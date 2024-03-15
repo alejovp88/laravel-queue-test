@@ -21,8 +21,8 @@ class TestController extends Controller
             ->where('batch', '=', $batchID)
             ->select('id');
 
-        $emailIds = $query->get();
-        $emailsCount = $emailIds->count();
+        $emailIds = $query->get()->toArray();
+        $emailsCount = count($emailIds);
 
         if ($emailsCount < $this->lowLoadAmount) {
             dispatch(new SendBulkEmails($companyId, $emailIds))->onQueue('high');

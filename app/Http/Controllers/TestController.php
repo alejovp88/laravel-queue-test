@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SendBulkEmails;
-use App\Models\User;
+use App\Models\MarketingEmails;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -16,7 +16,7 @@ class TestController extends Controller
     public function index($companyId, $batchID)
     {
         $companyId = 163;
-        $query = User::query();//168
+        $query = MarketingEmails::query();//168
         $query->where('company_id', '=', $companyId)
             ->where('batch', '=', $batchID)
             ->select('id');

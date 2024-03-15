@@ -3,25 +3,35 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SendBulkEmails;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class TestController extends Controller
 {
-    //
-    public function index()
-    {
-        $company_id = 163;
-        $email_ids = [198]; // 100
+    protected $lowLoadAmount = 100;
+    protected $midLoadAmount = 1000;
+    protected $emailsPerCycle = 1000;
 
-        if (count($email_ids) < 100) {
-            dispatch(new SendBulkEmails($company_id, $email_ids))->onQueue('high');
-        } else if (count($email_ids) < 1000) {
-            dispatch(new SendBulkEmails($company_id, $email_ids))->onQueue('medium');
+    public function index($companyId, $batchID)
+    {
+        $companyId = 163;
+        $query = User::query();//168
+        $query->where('company_id', '=', $companyId)
+            ->where('batch', '=', $batchID)
+            ->select('id');
+
+        $emailIds = $query->get();
+        $emailsCount = $emailIds->count();
+
+        if ($emailsCount < $this->lowLoadAmount) {
+            dispatch(new SendBulkEmails($companyId, $emailIds))->onQueue('high');
+        } else if ($emailsCount < $this->midLoadAmount) {
+            dispatch(new SendBulkEmails($companyId, $emailIds))->onQueue('medium');
         } else {
-            $email_jobs = array_chunk($email_ids, 1000); // 1000 emails per job
+            $email_jobs = array_chunk($emailIds, $this->emailsPerCycle);
             foreach ($email_jobs as $ids) {
-                dispatch(new SendBulkEmails($company_id, $ids))->onQueue('low');
+                dispatch(new SendBulkEmails($companyId, $ids))->onQueue('low');
             }
         }
 

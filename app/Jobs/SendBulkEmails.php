@@ -52,8 +52,6 @@ class SendBulkEmails implements ShouldQueue
         // Load company configuration
         $this->loadConfig();
 
-        // TODO: Check company email limit to see if we can send emails or just some of them (close to the limit)
-
         // Instance SendGrid
         $sendgrid = new \SendGrid($this->sendgridApiKey);
 

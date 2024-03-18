@@ -1,22 +1,20 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\api;
 
+use App\Http\Controllers\ApiController;
 use App\Jobs\SendBulkEmails;
 use App\Models\MarketingEmails;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
-class TestController extends Controller
+class EmailSendController extends ApiController
 {
     protected $lowLoadAmount = 100;
     protected $midLoadAmount = 1000;
     protected $emailsPerCycle = 1000;
 
-    public function index($companyId, $batchID)
+    public function index($companyId = 163, $batchID = 168)
     {
-        $companyId = 163;
-        $query = MarketingEmails::query();//168
+        $query = MarketingEmails::query();
         $query->where('company_id', '=', $companyId)
             ->where('batch', '=', $batchID)
             ->select('id');
@@ -35,6 +33,6 @@ class TestController extends Controller
             }
         }
 
-        return response()->json(['message' => 'Emails are being sent']);
+        return $this->responseJson(['message' => 'Emails are being sent']);
     }
 }

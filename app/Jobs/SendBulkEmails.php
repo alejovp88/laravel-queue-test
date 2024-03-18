@@ -54,7 +54,7 @@ class SendBulkEmails implements ShouldQueue
 
         // TODO: Check company email limit to see if we can send emails or just some of them (close to the limit)
 
-        // Instance SnedGrid
+        // Instance SendGrid
         $sendgrid = new \SendGrid($this->sendgridApiKey);
 
         // Send emails

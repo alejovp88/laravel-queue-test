@@ -49,16 +49,19 @@ class CSVBulkImport implements ShouldQueue
             'Contacts' => [
                 'table' => "{$this->wpDbPrefix}ks_contacts",
                 'meta_table' => "{$this->wpDbPrefix}ks_contacts_meta",
-                'contact_opt' => "{$this->wpDbPrefix}ks_contacts_opt"
+                'contact_opt' => "{$this->wpDbPrefix}ks_contacts_opt",
+                'object_type' => 'contact'
             ],
             'Accounts' => [
                 'table' => "{$this->wpDbPrefix}ks_accounts",
-                'meta_table' => "{$this->wpDbPrefix}ks_accounts_meta"
+                'meta_table' => "{$this->wpDbPrefix}ks_accounts_meta",
+                'object_type' => 'account'
             ],
             'Opportunities' => [
                 'table' => "{$this->wpDbPrefix}ks_contacts",
                 'meta_table' => "{$this->wpDbPrefix}ks_contacts_meta",
-                'stages_table' => "{$this->wpDbPrefix}ks_crm_opportunities_stages"
+                'stages_table' => "{$this->wpDbPrefix}ks_crm_opportunities_stages",
+                'object_type' => 'opportunity'
             ]
         ];
         $this->defaultFields = [
@@ -87,7 +90,6 @@ class CSVBulkImport implements ShouldQueue
                 'owner'
             ]
         ];
-
         $this->objectTypeOptions   = [
             'contact' => [
                 'field' => 'opt_status',
@@ -133,17 +135,23 @@ class CSVBulkImport implements ShouldQueue
 
         for($this->lineIndex = 1; $line = fgetcsv($csvFile); $this->lineIndex++) {
             if($this->lineIndex >= $this->offSet && $this->lineIndex < $this->numberOfRecords) {
+                $record = $this->fillCommonInformation($line, $this->defaultFields[$this->importType]);
+                [$fieldRulesFormatted, $notNullColumns, $optionalForeignKeys, $nullColumns] = $this->getFieldsDefinition();
+                $results = $this->makeFieldsValidation($nullColumns);
+
+
+
                 switch ($this->importType) {
                     case 'Contacts': {
-                        $this->processContacts($line, $successFile, $failedFile);
+                        $this->processContacts($line, $record, $successFile, $failedFile);
                         break;
                     }
                     case 'Accounts': {
-                        $this->processAccounts($line, $successFile, $failedFile);
+                        $this->processAccounts($line, $record, $successFile, $failedFile);
                         break;
                     }
                     case 'Opportunities': {
-                        $this->processOpportunities($line, $successFile, $failedFile);
+                        $this->processOpportunities($line, $record, $successFile, $failedFile);
                         break;
                     }
                 }
@@ -151,73 +159,161 @@ class CSVBulkImport implements ShouldQueue
         }
     }
 
-    protected function processContacts($line, $successFile, $failedFile) {
-        $record = $this->fillCommonInformation($line, $this->defaultFields['Contacts']);
-        [$fieldRulesFormatted, $notNullColumns, $optionalForeignKeys, $nullColumns] = $this->getFieldsDefinition();
-        $validLine = $this->makeFieldsValidation($nullColumns, $failedFile);
+    protected function processContacts($line, $record, $successFile, $failedFile) {
+        if(key_exists('email_address', $record) && !empty($record['email_address'])){
+            $validate_email = filter_var($record['email_address'], FILTER_VALIDATE_EMAIL);
+            if($validate_email == false){
+                $results['field_error'][] = [
+                    'field' => 'email_address',
+                    'message' => 'Invalid email_address',
+                    'value' => $record['email_address'],
+                    'row' => $this->lineIndex
+                ];
+                $isValidEmailField = false;
+            }
+        }
 
-        if($validLine) {
-            return $record;
+        if(key_exists('opt_status', $record)) {
+            $record['opt_status'] = $this->toCamelCase($record['opt_status']);
         }
     }
 
-    protected function processAccounts($line, $successFile, $failedFile) {
-        $record = $this->fillCommonInformation($line, $this->defaultFields['Accounts']);
-        [$fieldRulesFormatted, $notNullColumns, $optionalForeignKeys, $nullColumns] = $this->getFieldsDefinition();
-        $validLine = $this->makeFieldsValidation($nullColumns, $failedFile);
+    protected function processAccounts($line, $record, $successFile, $failedFile) {
+        $allCurrencies = $this->getAllCurrencies();
 
-        if($validLine) {
-            $allCurrencies = $this->getAllCurrencies();
-            return $record;
+        if(key_exists('type', $record)) {
+            $record['type'] = $this->toCamelCase($record['type']);
+        }
+
+        if (key_exists('currency', $record) && !empty($record['currency'])) {
+            $currency = $record['currency'];
+            $founded = false;
+
+            foreach ($allCurrencies as $data) {
+                if ($data["code"] === $currency || $data["name"] === $currency) {
+                    $record['currency'] = $data['code'];
+                    $founded = true;
+                    break;
+                }
+            }
+
+            if(!$founded) {
+                $results['field_error'][] = [
+                    'field' => 'currency',
+                    'message' => 'Invalid currency',
+                    'value' => $record['currency'],
+                    'row' => $this->lineIndex
+                ];
+                $is_valid_currency_field = false;
+            }
         }
     }
 
-    protected function processOpportunities($line, $successFile, $failedFile) {
-        $record = $this->fillCommonInformation($line, $this->defaultFields['Opportunities']);
-        [$fieldRulesFormatted, $notNullColumns, $optionalForeignKeys, $nullColumns] = $this->getFieldsDefinition();
-        $validLine = $this->makeFieldsValidation($nullColumns, $failedFile);
+    protected function processOpportunities($line, $record, $successFile, $failedFile) {
 
-        if($validLine) {
-            if(isset($record['company']) && !empty($record['company'])) {
-                $account = DB::TABLE("wp_ks_accounts")
-                    ->whereRaw("name = '{$record['company']}'")
-                    ->where('company_id', '=', $this->companyId)
-                    ->select('id')
-                    ->first();
-
-                if ($account) {
-                    $record['account_id'] = $account->id;
-                }
-            }
-
-            if(isset($record['contact']) && !empty($record['contact'])) {
-                $contact = DB::TABLE("wp_ks_contacts")
-                    ->whereRaw("email_address = '{$record['contact']}'")
-                    ->where('company_id', '=', $this->companyId)
-                    ->select('id')
-                    ->first();
-                if ($contact) {
-                    $record['contact_id'] = $contact->id;
-                }
-            }
-
-            $customStages = DB::table("{$this->defaultTables['Opportunities']['stages_table']}")
+        if(!empty($record['company'])) {
+            $account = DB::TABLE("{$this->defaultTables['Accounts']['table']}")
+                ->whereRaw("name = '{$record['company']}'")
                 ->where('company_id', '=', $this->companyId)
-                ->select('*')
-                ->orderBy('position', 'ASC')
-                ->get();
+                ->select('id')
+                ->first();
 
-            if ($customStages) {
-                $this->objectTypeOptions['opportunity']['options'] = array_map(function ($stage) {
-                    return $stage['stage_name'];
-                }, $customStages->toArray());
-
-                $this->objectTypeOptions['opportunity']['ids'] = array_map(function ($stage) {
-                    return $stage['id'];
-                }, $customStages->toArray());
+            if ($account) {
+                $record['account_id'] = $account->id;
             }
+        }
 
-            return $record;
+        if(!empty($record['contact'])) {
+            $contact = DB::TABLE("{$this->defaultTables['Contacts']['table']}")
+                ->whereRaw("email_address = '{$record['contact']}'")
+                ->where('company_id', '=', $this->companyId)
+                ->select('id')
+                ->first();
+            if ($contact) {
+                $record['contact_id'] = $contact->id;
+            }
+        }
+
+        $customStages = DB::table("{$this->defaultTables['Opportunities']['stages_table']}")
+            ->where('company_id', '=', $this->companyId)
+            ->select('*')
+            ->orderBy('position', 'ASC')
+            ->get();
+
+        if ($customStages) {
+            $this->objectTypeOptions['opportunity']['options'] = array_map(function ($stage) {
+                return $stage['stage_name'];
+            }, $customStages->toArray());
+
+            $this->objectTypeOptions['opportunity']['ids'] = array_map(function ($stage) {
+                return $stage['id'];
+            }, $customStages->toArray());
+        }
+
+        //--- Validate close_date field
+        if (key_exists('close_date', $record)) {
+            $date = date('Y-m-d', strtotime($record['close_date']));
+            $validate_date =  explode('-', $date)[0];
+            if ($validate_date == 1970 || !$validate_date) {
+                $results['field_error'][] = [
+                    'field' => 'close_date',
+                    'message' => 'Invalid close_date format',
+                    'value' => $record['close_date'],
+                    'row' => $this->lineIndex
+                ];
+                $is_valid_date_field = false;
+            } else {
+                $csv_data_item['close_date'] = date('Y-m-d', strtotime($record['close_date']));
+            }
+        }
+
+        //--- Validate account_id field from opportunity
+        if (!key_exists('account_id', $record) || is_null($record['account_id'])) {
+            $results['field_error'][] =[
+                'field' => 'account_id',
+                'message' => 'Invalid account_id',
+                'value' => $record['account_id'] ?? '',
+                'row' => $this->lineIndex
+            ];
+            $is_valid_foreign_record = false;
+        }
+
+        //--- Validate contact_id field from opportunity
+        if (!key_exists('contact_id', $record) || is_null($record['contact_id'])) {
+            $results['field_error'][] =[
+                'field' => 'contact_id',
+                'message' => 'Invalid contact_id',
+                'value' => $record['contact_id'] ?? '',
+                'row' => $this->lineIndex
+            ];
+            $is_valid_foreign_record = false;
+        }
+
+        /** quede en esta parte del refactor*/
+        if ($is_valid_foreign_record) {
+            //--- Validate contact_id belongs to account_id from opportunity
+            if (key_exists('contact_id', $record) && key_exists('account_id', $record)) {
+
+                $contactId = $record['contact_id'];
+                $accountId = $record['account_id'];
+
+                $contact_account_id = $ks_contact->check_contact_by_account_id($contactId, $accountId, $this->companyId);
+
+                if ($contact_account_id != $contactId || is_null($contactId)) {
+                    $results['field_error'][] = [
+                        'field' => 'contact_id',
+                        'message' => 'Invalid contact_id is not related to a company',
+                        'value' => $record['contact_id'],
+                        'row' => $this->lineIndex
+                    ];
+                    $is_valid_foreign_record = false;
+                }
+            }
+        }
+
+        if ($object_type == 'opportunity' && key_exists('stage', $csv_data_item)) {
+            $found_key = array_search($csv_data_item['stage'], $this->objectTypeOptions[$object_type]['options']);
+            $csv_data_item['stage'] = $this->objectTypeOptions[$object_type]['ids'][$found_key];
         }
     }
 
@@ -289,7 +385,7 @@ class CSVBulkImport implements ShouldQueue
         /** system checks which fields from the line mapping are missing by removing the one that are optionals */
         $nullColumns = array_diff($notNullColumns, $this->fieldsMap);
         $nullColumns = array_values($nullColumns);
-        if (array_search('id', $nullColumns) !== false) {
+        if (in_array('id', $nullColumns) !== false) {
             unset($nullColumns[array_search('id', $nullColumns)]);
             $nullColumns = array_values($nullColumns);
         }
@@ -302,9 +398,10 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function makeFieldsValidation($nullColumns, $failedFile) {
+    protected function makeFieldsValidation($nullColumns) {
+        $results = [];
         if (count($nullColumns) > 0) {
-            $results = [];
+
             foreach ($nullColumns as $column) {
                 $results['field_error'][] = [
                     'field' => $column,
@@ -320,13 +417,9 @@ class CSVBulkImport implements ShouldQueue
                     'custom_fields' => [],
                 ];
             }
+        }
 
-            fputcsv($failedFile, $results);
-            return false;
-        }
-        else {
-            return true;
-        }
+        return $results;
     }
 
     protected function getAllCurrencies()
@@ -1003,12 +1096,12 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function processLine($record) {
+    protected function processLine($record, $results, $notNullColumns, $optionalForeignKeys) {
 
-        $is_valid_column = true;
-        $is_valid_foreign_record = true;
+        $isValidColumn = true;
+        $isValidForeignRecord = true;
         $is_valid_user_field = true;
-        $is_valid_type_field = true;
+        $isValidTypeField = true;
         $is_valid_currency_field = true;
         $is_valid_custom_fields = true;
         $is_valid_date_field = true;
@@ -1024,6 +1117,96 @@ class CSVBulkImport implements ShouldQueue
                 }
             }
         }
+
+        // ---- Check blank values in not null columns
+        foreach ($notNullColumns as $column) {
+            if ($column != 'id') {
+                if ((empty($$record[$column]) || !isset($record[$column])) && $record[$column] !== 0) {
+                    $results['field_error'][] = [
+                        'field' => $column,
+                        'message' => "Invalid $column",
+                        'value' => "",
+                        'row' => $this->lineIndex
+                    ];
+                    $isValidColumn = false;
+                }
+            }
+        }
+
+        //---- Fill optional foreign keys
+        foreach ($optionalForeignKeys as $key2 => $key_value) {
+            if (!key_exists($key_value, $record) || empty($record[$key_value])) {
+                $record[$key_value] = null;
+            }
+        }
+
+        //----- Check foreign records
+        $foreignRecordsCheck = $this->checkForeignRecord($record, $this->defaultTables[$this->importType]['table']);
+
+        if (!empty($foreignRecordsCheck)) {
+            foreach ($foreignRecordsCheck as $foreignRecord) {
+
+                if($this->defaultTables[$this->importType]['object_type'] === 'opportunity' && $foreignRecord['field'] === 'contact_id') {
+                    continue;
+                } else {
+                    if (!$foreignRecord['exist']) {
+                        $results['field_error'][] = [
+                            'field' => $foreignRecord['field'],
+                            'message' => "Invalid {$foreignRecord['field']}",
+                            'value' => $foreignRecord['id'],
+                            'row' => $this->lineIndex
+                        ];
+                        $isValidForeignRecord = false;
+                    }
+                }
+            }
+        }
+
+        //---- Validate object type options
+        $objectTypeField = $this->objectTypeOptions[$this->importType]['field'];
+        $object_type_options = $this->objectTypeOptions[$this->importType]['options'];
+        if (key_exists($objectTypeField, $record)) {
+            if (!in_array($record[$objectTypeField], $object_type_options)) {
+                $results['field_error'][] = [
+                    'field' => $objectTypeField,
+                    'message' => "Invalid $objectTypeField",
+                    'value' => $record[$objectTypeField],
+                    'row' => $this->lineIndex
+                ];
+                $isValidTypeField = false;
+            }
+        }
+    }
+
+    protected function checkForeignRecord($record, $table) {
+        $objects = ['contact_id', 'opportunity_id', 'account_id'];
+        $results = [];
+
+        foreach ($objects as $object) {
+            if (key_exists($object, $record) && !empty($record[$object])) {
+                $exist = false;
+                $element = DB::table("$table")
+                    ->where("$object", '=', $record[$object])
+                    ->where("company_id", '=', $this->companyId)
+                    ->first();
+
+                if($element) {
+                    $exist = true;
+                }
+
+                $results[] = [
+                    'field' => $object,
+                    'exist' => $exist,
+                    'id' => $record[$object]
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    protected function toCamelCase($phrase) {
+        return str_replace(' ', '', ucwords($phrase));
     }
 }
 

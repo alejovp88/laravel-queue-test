@@ -2,6 +2,12 @@
 
 namespace App\Jobs;
 
+use App\Models\Account;
+use App\Models\AccountMeta;
+use App\Models\Contact;
+use App\Models\ContactMeta;
+use App\Models\Opportunity;
+use App\Models\OpportunityMeta;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -10,7 +16,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use mysql_xdevapi\Collection;
 
 class CSVBulkImport implements ShouldQueue
 {
@@ -19,10 +24,13 @@ class CSVBulkImport implements ShouldQueue
     protected $importType;
     protected $fileName;
     protected $fieldsMap;
+    protected $fieldErrors;
     protected $offSet;
     protected $numberOfRecords;
     protected $companyId;
     protected $userId;
+    protected $csvId;
+    protected $listId;
     protected $wpDbPrefix;
     protected $defaultFields;
     protected $defaultTables;
@@ -54,6 +62,8 @@ class CSVBulkImport implements ShouldQueue
         $this->fieldsMap = json_decode($params['fieldsMap']);
         $this->companyId = $params['companyId'];
         $this->userId = $params['userId'];
+        $this->csvId = $params['csvId'];
+        $this->listId = null;
         $this->tableSchema = env('DB_DATABASE');
         $this->wpDbPrefix = env('DB_WP_TABLES_PREFIX', 'wp_');
         $this->defaultTables = [
@@ -178,20 +188,20 @@ class CSVBulkImport implements ShouldQueue
 
                 switch ($this->importType) {
                     case 'Contacts': {
-                        [$record, $results] = $this->processContacts($record, $results);
+                        [$record, $results] = $this->validateContacts($record, $results);
                         break;
                     }
                     case 'Accounts': {
-                        [$record, $results] = $this->processAccounts($record, $results);
+                        [$record, $results] = $this->validateAccounts($record, $results);
                         break;
                     }
                     case 'Opportunities': {
-                        [$record, $results] = $this->processOpportunities($record, $results);
+                        [$record, $results] = $this->validateOpportunities($record, $results);
                         break;
                     }
                 }
 
-                [$record, $results] = $this->processLine($record, $results);
+                [$record, $results] = $this->validateLine($record, $results);
 
                 // ---- Set error and skip row if it's invalid
                 if (
@@ -208,11 +218,35 @@ class CSVBulkImport implements ShouldQueue
                     continue;
                 };
 
+                /** system search for element values to check if exist in the database */
+                $query = DB::table("{$this->defaultTables[$this->importType]['table']}");
+                if (key_exists('id', $record) && $record['id']) {
+                    $query->where('id', '=', $record['id']);
+                }
+
+                if ($this->defaultTables[$this->importType]['object_type'] === 'contact') {
+                    $query->whereRaw("email_address = '{$record['email_address']}");
+                } elseif ($this->defaultTables[$this->importType]['object_type'] === 'account') {
+                    $query->whereRaw("name = '{$record['name']}");
+                }
+
+                $element = $query->where('company_id', '=', $this->companyId)
+                ->select('id')
+                ->first();
+
+                // ---- Update record if ID exist
+                if ($element) {
+                    $record['id'] = $element->id;
+                    $this->updateRecord($record, $results);
+                } else {
+                    $this->insertRecord($record, $results);
+                }
+
             }
         }
     }
 
-    protected function processContacts($record, $results) {
+    protected function validateContacts($record, $results) {
         if(key_exists('email_address', $record) && !empty($record['email_address'])){
             $validateEmail = filter_var($record['email_address'], FILTER_VALIDATE_EMAIL);
             if($validateEmail) {
@@ -236,7 +270,7 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function processAccounts($record, $results) {
+    protected function validateAccounts($record, $results) {
         $allCurrencies = $this->getAllCurrencies();
 
         if(key_exists('type', $record)) {
@@ -272,7 +306,7 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function processOpportunities($record, $results) {
+    protected function validateOpportunities($record, $results) {
 
         $objectType = $this->defaultTables[$this->importType]['object_type'];
 
@@ -1169,9 +1203,8 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function processLine($record, $results) {
+    protected function validateLine($record, $results) {
 
-        $status = 'error';
         $record['company_id'] = $this->companyId;
 
         foreach ($record as $key => $value) {
@@ -1323,7 +1356,7 @@ class CSVBulkImport implements ShouldQueue
         return str_replace(' ', '', ucwords($phrase));
     }
 
-    function getMetaValuesInCsv($csvHeader) {
+    protected function getMetaValuesInCsv($csvHeader) {
 
         $settingKey = "{$this->companyId}_{$this->defaultTables[$this->importType]['object_type']}_custom-fields";
 
@@ -1366,6 +1399,145 @@ class CSVBulkImport implements ShouldQueue
         }
 
         return [$customFieldsInCsvData, $availableCustomFieldValues];
+    }
+
+    protected function updateRecord($record, $results) {
+        $status = 'error';
+
+        $id = $record['id'];
+        $optData = get_transient('import_' . $this->csvId);
+
+        //Update opt_status with the value from the modal if field is empty
+        if ($optData && count($optData) > 0 && empty($csv_data_item['opt_status'])) {
+            $record['opt_status'] = $optData['opt_status'];
+        }
+
+        switch ($this->importType) {
+            case 'Contacts': {
+                $row = Contact::find($id);
+                break;
+            }
+            case 'Accounts': {
+                $row = Account::find($id);
+                break;
+            }
+            case 'Opportunities': {
+                $row = Opportunity::find($id);
+                break;
+            }
+        }
+
+        $row->fill($record);
+        $updated = $row->save();
+
+        $status = $updated ? 'updated' : $status;
+
+        /** set message when status remains in error */
+        //---- Save / update custom fields
+        $createdCustomFields = $this->saveCustomFields($record, $id);
+
+        if (!empty($createdCustomFields)) {
+            foreach ($createdCustomFields as $customField) {
+                if ($customField['status'] == 'error') {
+                    $this->fieldErrors[] = [
+                        'field' => $customField['field'],
+                        'message' => "Invalid {$customField['field']}",
+                        'value' => $customField['value'],
+                        'row' => $this->lineIndex
+                    ];
+                }
+            }
+        }
+        $results['rows'][] = [
+            'status' => $status,
+            'id' => $id,
+            'custom_fields' => $createdCustomFields,
+        ];
+
+        return [
+            $record,
+            $results
+        ];
+    }
+
+    protected function insertRecord($record, $results) {
+
+    }
+
+    protected function saveCustomFields($record, $id) {
+        $results = [];
+
+        $objectType = $this->defaultTables[$this->importType]['object_type'];
+        if (count($this->customFieldsToSave) > 0) {
+            foreach ($this->customFieldsToSave as &$customFieldRow) {
+                $status = 'error';
+                $objectKey = $objectType . '_id';
+                $customFieldRow[$objectKey] = $id;
+
+                switch ($this->importType) {
+                    case 'Contacts': {
+                        $row = ContactMeta::where("{$objectKey}", '=', $id)
+                            ->whereRaw("name = '{$customFieldRow['name']}'")
+                            ->first();
+                        break;
+                    }
+                    case 'Accounts': {
+                        $row = AccountMeta::where("{$objectKey}", '=', $id)
+                            ->whereRaw("name = '{$customFieldRow['name']}'")
+                            ->first();
+                        break;
+                    }
+                    case 'Opportunities': {
+                        $row = OpportunityMeta::where("{$objectKey}", '=', $id)
+                            ->whereRaw("name = '{$customFieldRow['name']}'")
+                            ->first();
+                        break;
+                    }
+                }
+
+                if (!empty($row)) {
+                    if ($row->value == $customFieldRow['value']) {
+                        continue;
+                    }
+                    $row->fill($customFieldRow);
+                    $updated = $row->save();
+
+                    $status = $updated ? 'updated' : $status;
+                } else {
+                    if ($objectType == 'contact') {
+                        $record['imported'] = 1;
+                    }
+
+                    switch ($this->importType) {
+                        case 'Contacts': {
+                            $row = new ContactMeta();
+                            break;
+                        }
+                        case 'Accounts': {
+                            $row = new AccountMeta();
+                            break;
+                        }
+                        case 'Opportunities': {
+                            $row = new OpportunityMeta();
+                            break;
+                        }
+                    }
+
+                    $row->fill($customFieldRow);
+                    $row->save();
+
+                    $status = $row->id ? 'created' : $status;
+                }
+
+                $results[] = [
+                    'field' => $customFieldRow['name'],
+                    'status' => $status,
+                    'value' => $customFieldRow['value']
+                ];
+            }
+        }
+
+        return $results;
     }
 }
 

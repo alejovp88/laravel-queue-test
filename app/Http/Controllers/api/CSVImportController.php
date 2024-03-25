@@ -28,7 +28,8 @@ class CSVImportController extends ApiController
                 'csv_file',
                 'name',
                 'type',
-                'user_id'
+                'user_id',
+                'id'
             ]);
 
         $record = $query->first();
@@ -49,7 +50,8 @@ class CSVImportController extends ApiController
                 'numberOfRecords' => $lineCounter,
                 'fieldsMap' => $record->field_map,
                 'companyId' => $companyId,
-                'userId' => $userId
+                'userId' => $userId,
+                'csvId' => $record->id
             ];
 
             Log::info("Total CSV lines: $lineCounter");

@@ -8,6 +8,7 @@ use App\Models\Contact;
 use App\Models\ContactMeta;
 use App\Models\Opportunity;
 use App\Models\OpportunityMeta;
+use App\Services\CSVBulkImportService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -47,13 +48,14 @@ class CSVBulkImport implements ShouldQueue
     protected $customFieldsInCsvData;
     protected $availableCustomFieldValues;
     protected $customFieldsToSave;
+    protected $CSVBulkImportService;
 
     /**
      * Create a new job instance.
      *
      * @return void
      */
-    public function __construct($params)
+    public function __construct($params, CSVBulkImportService $CSVBulkImportService)
     {
         $this->importType = $params['importType'];
         $this->fileName = $params['fileName'];
@@ -66,6 +68,7 @@ class CSVBulkImport implements ShouldQueue
         $this->listId = null;
         $this->tableSchema = env('DB_DATABASE');
         $this->wpDbPrefix = env('DB_WP_TABLES_PREFIX', 'wp_');
+        $this->CSVBulkImportService = $CSVBulkImportService;
         $this->defaultTables = [
             'Contacts' => [
                 'table' => "{$this->wpDbPrefix}ks_contacts",
@@ -234,12 +237,14 @@ class CSVBulkImport implements ShouldQueue
                 ->select('id')
                 ->first();
 
+                $optData = get_transient('import_' . $this->csvId);
+
                 // ---- Update record if ID exist
                 if ($element) {
                     $record['id'] = $element->id;
-                    $this->updateRecord($record, $results);
+                    [$record, $results] = $this->updateRecord($record, $results, $optData);
                 } else {
-                    $this->insertRecord($record, $results);
+                    [$record, $results] = $this->insertRecord($record, $results, $optData);
                 }
 
             }
@@ -271,7 +276,7 @@ class CSVBulkImport implements ShouldQueue
     }
 
     protected function validateAccounts($record, $results) {
-        $allCurrencies = $this->getAllCurrencies();
+        $allCurrencies = $this->CSVBulkImportService->getAllCurrencies();
 
         if(key_exists('type', $record)) {
             $record['type'] = $this->toCamelCase($record['type']);
@@ -529,680 +534,6 @@ class CSVBulkImport implements ShouldQueue
         return $results;
     }
 
-    protected function getAllCurrencies()
-    {
-        return [
-            "AED" => [
-                "name" => "United Arab Emirates Dirham",
-                "code" => "AED",
-            ],
-            "AFN" => [
-                "name" => "Afghan Afghani",
-                "code" => "AFN",
-            ],
-            "ALL" => [
-                "name" => "Albanian Lek",
-                "code" => "ALL",
-            ],
-            "AMD" => [
-                "name" => "Armenian Dram",
-                "code" => "AMD",
-            ],
-            "ANG" => [
-                "name" => "NL Antillean Guilder",
-                "code" => "ANG",
-            ],
-            "AOA" => [
-                "name" => "Angolan Kwanza",
-                "code" => "AOA",
-            ],
-            "ARS" => [
-                "name" => "Argentine Peso",
-                "code" => "ARS",
-            ],
-            "AUD" => [
-                "name" => "Australian Dollar",
-                "code" => "AUD",
-            ],
-            "AWG" => [
-                "name" => "Aruban Florin",
-                "code" => "AWG",
-            ],
-            "AZN" => [
-                "name" => "Azerbaijani Manat",
-                "code" => "AZN",
-            ],
-            "BAM" => [
-                "name" => "Bosnia-Herzegovina Convertible Mark",
-                "code" => "BAM",
-            ],
-            "BBD" => [
-                "name" => "Barbadian Dollar",
-                "code" => "BBD",
-            ],
-            "BDT" => [
-                "name" => "Bangladeshi Taka",
-                "code" => "BDT",
-            ],
-            "BGN" => [
-                "name" => "Bulgarian Lev",
-                "code" => "BGN",
-            ],
-            "BHD" => [
-                "name" => "Bahraini Dinar",
-                "code" => "BHD",
-            ],
-            "BIF" => [
-                "name" => "Burundian Franc",
-                "code" => "BIF",
-            ],
-            "BMD" => [
-                "name" => "Bermudan Dollar",
-                "code" => "BMD",
-            ],
-            "BND" => [
-                "name" => "Brunei Dollar",
-                "code" => "BND",
-            ],
-            "BOB" => [
-                "name" => "Bolivian Boliviano",
-                "code" => "BOB",
-            ],
-            "BRL" => [
-                "name" => "Brazilian Real",
-                "code" => "BRL",
-            ],
-            "BSD" => [
-                "name" => "Bahamian Dollar",
-                "code" => "BSD",
-            ],
-            "BTN" => [
-                "name" => "Bhutanese Ngultrum",
-                "code" => "BTN",
-            ],
-            "BWP" => [
-                "name" => "Botswanan Pula",
-                "code" => "BWP",
-            ],
-            "BYN" => [
-                "name" => "Belarusian ruble",
-                "code" => "BYN",
-            ],
-            "BYR" => [
-                "name" => "Belarusian Ruble",
-                "code" => "BYR",
-            ],
-            "BZD" => [
-                "name" => "Belize Dollar",
-                "code" => "BZD",
-            ],
-            "CAD" => [
-                "name" => "Canadian Dollar",
-                "code" => "CAD",
-            ],
-            "CDF" => [
-                "name" => "Congolese Franc",
-                "code" => "CDF",
-            ],
-            "CHF" => [
-                "name" => "Swiss Franc",
-                "code" => "CHF",
-            ],
-            "CLF" => [
-                "name" => "Unidad de Fomento",
-                "code" => "CLF",
-            ],
-            "CLP" => [
-                "name" => "Chilean Peso",
-                "code" => "CLP"
-            ],
-            "CNY" => [
-                "name" => "Chinese Yuan",
-                "code" => "CNY",
-            ],
-            "COP" => [
-                "name" => "Colombian Peso",
-                "code" => "COP",
-            ],
-            "CRC" => [
-                "name" => "Costa Rican Colón",
-                "code" => "CRC"
-            ],
-            "CUC" => [
-                "name" => "Cuban Convertible Peso",
-                "code" => "CUC",
-            ],
-            "CUP" => [
-                "name" => "Cuban Peso",
-                "code" => "CUP",
-            ],
-            "CVE" => [
-                "name" => "Cape Verdean Escudo",
-                "code" => "CVE",
-            ],
-            "CZK" => [
-                "name" => "Czech Republic Koruna",
-                "code" => "CZK",
-            ],
-            "DJF" => [
-                "name" => "Djiboutian Franc",
-                "code" => "DJF",
-            ],
-            "DKK" => [
-                "name" => "Danish Krone",
-                "code" => "DKK",
-            ],
-            "DOP" => [
-                "name" => "Dominican Peso",
-                "code" => "DOP",
-            ],
-            "DZD" => [
-                "name" => "Algerian Dinar",
-                "code" => "DZD",
-            ],
-            "EGP" => [
-                "name" => "Egyptian Pound",
-                "code" => "EGP",
-            ],
-            "ERN" => [
-                "name" => "Eritrean Nakfa",
-                "code" => "ERN",
-            ],
-            "ETB" => [
-                "name" => "Ethiopian Birr",
-                "code" => "ETB",
-            ],
-            "EUR" => [
-                "name" => "Euro",
-                "code" => "EUR",
-            ],
-            "FJD" => [
-                "name" => "Fijian Dollar",
-                "code" => "FJD",
-            ],
-            "FKP" => [
-                "name" => "Falkland Islands Pound",
-                "code" => "FKP",
-            ],
-            "GBP" => [
-                "name" => "British Pound Sterling",
-                "code" => "GBP",
-            ],
-            "GEL" => [
-                "name" => "Georgian Lari",
-                "code" => "GEL",
-            ],
-            "GGP" => [
-                "name" => "Guernsey pound",
-                "code" => "GGP",
-            ],
-            "GHS" => [
-                "name" => "Ghanaian Cedi",
-                "code" => "GHS",
-            ],
-            "GIP" => [
-                "name" => "Gibraltar Pound",
-                "code" => "GIP",
-            ],
-            "GMD" => [
-                "name" => "Gambian Dalasi",
-                "code" => "GMD",
-            ],
-            "GNF" => [
-                "name" => "Guinean Franc",
-                "code" => "GNF",
-            ],
-            "GTQ" => [
-                "name" => "Guatemalan Quetzal",
-                "code" => "GTQ",
-            ],
-            "GYD" => [
-                "name" => "Guyanaese Dollar",
-                "code" => "GYD",
-            ],
-            "HKD" => [
-                "name" => "Hong Kong Dollar",
-                "code" => "HKD",
-            ],
-            "HNL" => [
-                "name" => "Honduran Lempira",
-                "code" => "HNL",
-            ],
-            "HRK" => [
-                "name" => "Croatian Kuna",
-                "code" => "HRK",
-            ],
-            "HTG" => [
-                "name" => "Haitian Gourde",
-                "code" => "HTG",
-            ],
-            "HUF" => [
-                "name" => "Hungarian Forint",
-                "code" => "HUF",
-            ],
-            "IDR" => [
-                "name" => "Indonesian Rupiah",
-                "code" => "IDR",
-            ],
-            "ILS" => [
-                "name" => "Israeli New Sheqel",
-                "code" => "ILS",
-            ],
-            "IMP" => [
-                "name" => "Manx pound",
-                "code" => "IMP",
-            ],
-            "INR" => [
-                "name" => "Indian Rupee",
-                "code" => "INR",
-            ],
-            "IQD" => [
-                "name" => "Iraqi Dinar",
-                "code" => "IQD",
-            ],
-            "IRR" => [
-                "name" => "Iranian Rial",
-                "code" => "IRR",
-            ],
-            "ISK" => [
-                "name" => "Icelandic Króna",
-                "code" => "ISK",
-            ],
-            "JEP" => [
-                "name" => "Jersey pound",
-                "code" => "JEP",
-            ],
-            "JMD" => [
-                "name" => "Jamaican Dollar",
-                "code" => "JMD",
-            ],
-            "JOD" => [
-                "name" => "Jordanian Dinar",
-                "code" => "JOD",
-            ],
-            "JPY" => [
-                "name" => "Japanese Yen",
-                "code" => "JPY",
-            ],
-            "KES" => [
-                "name" => "Kenyan Shilling",
-                "code" => "KES",
-            ],
-            "KGS" => [
-                "name" => "Kyrgystani Som",
-                "code" => "KGS",
-            ],
-            "KHR" => [
-                "name" => "Cambodian Riel",
-                "code" => "KHR",
-            ],
-            "KMF" => [
-                "name" => "Comorian Franc",
-                "code" => "KMF",
-            ],
-            "KPW" => [
-                "name" => "North Korean Won",
-                "code" => "KPW",
-            ],
-            "KRW" => [
-                "name" => "South Korean Won",
-                "code" => "KRW",
-            ],
-            "KWD" => [
-                "name" => "Kuwaiti Dinar",
-                "code" => "KWD",
-            ],
-            "KYD" => [
-                "name" => "Cayman Islands Dollar",
-                "code" => "KYD",
-            ],
-            "KZT" => [
-                "name" => "Kazakhstani Tenge",
-                "code" => "KZT",
-            ],
-            "LAK" => [
-                "name" => "Laotian Kip",
-                "code" => "LAK",
-            ],
-            "LBP" => [
-                "name" => "Lebanese Pound",
-                "code" => "LBP",
-            ],
-            "LKR" => [
-                "name" => "Sri Lankan Rupee",
-                "code" => "LKR",
-            ],
-            "LRD" => [
-                "name" => "Liberian Dollar",
-                "code" => "LRD",
-            ],
-            "LSL" => [
-                "name" => "Lesotho Loti",
-                "code" => "LSL",
-            ],
-            "LTL" => [
-                "name" => "Lithuanian Litas",
-                "code" => "LTL",
-            ],
-            "LVL" => [
-                "name" => "Latvian Lats",
-                "code" => "LVL",
-            ],
-            "LYD" => [
-                "name" => "Libyan Dinar",
-                "code" => "LYD",
-            ],
-            "MAD" => [
-                "name" => "Moroccan Dirham",
-                "code" => "MAD",
-            ],
-            "MDL" => [
-                "name" => "Moldovan Leu",
-                "code" => "MDL",
-            ],
-            "MGA" => [
-                "name" => "Malagasy Ariary",
-                "code" => "MGA",
-            ],
-            "MKD" => [
-                "name" => "Macedonian Denar",
-                "code" => "MKD",
-            ],
-            "MMK" => [
-                "name" => "Myanma Kyat",
-                "code" => "MMK",
-            ],
-            "MNT" => [
-                "name" => "Mongolian Tugrik",
-                "code" => "MNT",
-            ],
-            "MOP" => [
-                "name" => "Macanese Pataca",
-                "code" => "MOP",
-            ],
-            "MRO" => [
-                "name" => "Mauritanian ouguiya",
-                "code" => "MRO",
-            ],
-            "MUR" => [
-                "name" => "Mauritian Rupee",
-                "code" => "MUR",
-            ],
-            "MVR" => [
-                "name" => "Maldivian Rufiyaa",
-                "code" => "MVR",
-            ],
-            "MWK" => [
-                "name" => "Malawian Kwacha",
-                "code" => "MWK",
-            ],
-            "MXN" => [
-                "name" => "Mexican Peso",
-                "code" => "MXN",
-            ],
-            "MYR" => [
-                "name" => "Malaysian Ringgit",
-                "code" => "MYR",
-            ],
-            "MZN" => [
-                "name" => "Mozambican Metical",
-                "code" => "MZN",
-            ],
-            "NAD" => [
-                "name" => "Namibian Dollar",
-                "code" => "NAD",
-            ],
-            "NGN" => [
-                "name" => "Nigerian Naira",
-                "code" => "NGN",
-            ],
-            "NIO" => [
-                "name" => "Nicaraguan Córdoba",
-                "code" => "NIO",
-            ],
-            "NOK" => [
-                "name" => "Norwegian Krone",
-                "code" => "NOK",
-            ],
-            "NPR" => [
-                "name" => "Nepalese Rupee",
-                "code" => "NPR",
-            ],
-            "NZD" => [
-                "name" => "New Zealand Dollar",
-                "code" => "NZD",
-            ],
-            "OMR" => [
-                "name" => "Omani Rial",
-                "code" => "OMR",
-            ],
-            "PAB" => [
-                "name" => "Panamanian Balboa",
-                "code" => "PAB",
-            ],
-            "PEN" => [
-                "name" => "Peruvian Nuevo Sol",
-                "code" => "PEN",
-            ],
-            "PGK" => [
-                "name" => "Papua New Guinean Kina",
-                "code" => "PGK",
-            ],
-            "PHP" => [
-                "name" => "Philippine Peso",
-                "code" => "PHP",
-            ],
-            "PKR" => [
-                "name" => "Pakistani Rupee",
-                "code" => "PKR",
-            ],
-            "PLN" => [
-                "name" => "Polish Zloty",
-                "code" => "PLN",
-            ],
-            "PYG" => [
-                "name" => "Paraguayan Guarani",
-                "code" => "PYG",
-            ],
-            "QAR" => [
-                "name" => "Qatari Rial",
-                "code" => "QAR",
-            ],
-            "RON" => [
-                "name" => "Romanian Leu",
-                "code" => "RON",
-            ],
-            "RSD" => [
-                "name" => "Serbian Dinar",
-                "code" => "RSD",
-            ],
-            "RUB" => [
-                "name" => "Russian Ruble",
-                "code" => "RUB",
-            ],
-            "RWF" => [
-                "name" => "Rwandan Franc",
-                "code" => "RWF",
-            ],
-            "SAR" => [
-                "name" => "Saudi Riyal",
-                "code" => "SAR",
-            ],
-            "SBD" => [
-                "name" => "Solomon Islands Dollar",
-                "code" => "SBD",
-            ],
-            "SCR" => [
-                "name" => "Seychellois Rupee",
-                "code" => "SCR",
-            ],
-            "SDG" => [
-                "name" => "Sudanese Pound",
-                "code" => "SDG",
-            ],
-            "SEK" => [
-                "name" => "Swedish Krona",
-                "code" => "SEK",
-            ],
-            "SGD" => [
-                "name" => "Singapore Dollar",
-                "code" => "SGD",
-            ],
-            "SHP" => [
-                "name" => "Saint Helena Pound",
-                "code" => "SHP",
-            ],
-            "SLL" => [
-                "name" => "Sierra Leonean Leone",
-                "code" => "SLL",
-            ],
-            "SOS" => [
-                "name" => "Somali Shilling",
-                "code" => "SOS",
-            ],
-            "SRD" => [
-                "name" => "Surinamese Dollar",
-                "code" => "SRD",
-            ],
-            "STD" => [
-                "name" => "São Tomé and Príncipe dobra",
-                "code" => "STD",
-            ],
-            "SVC" => [
-                "name" => "Salvadoran Colón",
-                "code" => "SVC",
-            ],
-            "SYP" => [
-                "name" => "Syrian Pound",
-                "code" => "SYP",
-            ],
-            "SZL" => [
-                "name" => "Swazi Lilangeni",
-                "code" => "SZL",
-            ],
-            "THB" => [
-                "name" => "Thai Baht",
-                "code" => "THB",
-            ],
-            "TJS" => [
-                "name" => "Tajikistani Somoni",
-                "code" => "TJS",
-            ],
-            "TMT" => [
-                "name" => "Turkmenistani Manat",
-                "code" => "TMT",
-            ],
-            "TND" => [
-                "name" => "Tunisian Dinar",
-                "code" => "TND",
-            ],
-            "TOP" => [
-                "name" => "Tongan Paʻanga",
-                "code" => "TOP",
-            ],
-            "TRY" => [
-                "name" => "Turkish Lira",
-                "code" => "TRY",
-            ],
-            "TTD" => [
-                "name" => "Trinidad and Tobago Dollar",
-                "code" => "TTD",
-            ],
-            "TWD" => [
-                "name" => "New Taiwan Dollar",
-                "code" => "TWD",
-            ],
-            "TZS" => [
-                "name" => "Tanzanian Shilling",
-                "code" => "TZS",
-            ],
-            "UAH" => [
-                "name" => "Ukrainian Hryvnia",
-                "code" => "UAH",
-            ],
-            "UGX" => [
-                "name" => "Ugandan Shilling",
-                "code" => "UGX",
-            ],
-            "USD" => [
-                "name" => "US Dollar",
-                "code" => "USD",
-            ],
-            "UYU" => [
-                "name" => "Uruguayan Peso",
-                "code" => "UYU",
-            ],
-            "UZS" => [
-                "name" => "Uzbekistan Som",
-                "code" => "UZS",
-            ],
-            "VEF" => [
-                "name" => "Venezuelan Bolívar",
-                "code" => "VEF",
-            ],
-            "VND" => [
-                "name" => "Vietnamese Dong",
-                "code" => "VND",
-            ],
-            "VUV" => [
-                "name" => "Vanuatu Vatu",
-                "code" => "VUV",
-            ],
-            "WST" => [
-                "name" => "Samoan Tala",
-                "code" => "WST",
-            ],
-            "XAF" => [
-                "name" => "CFA Franc BEAC",
-                "code" => "XAF",
-            ],
-            "XAG" => [
-                "name" => "Silver Ounce",
-                "code" => "XAG",
-            ],
-            "XAU" => [
-                "name" => "Gold Ounce",
-                "code" => "XAU",
-            ],
-            "XCD" => [
-                "name" => "East Caribbean Dollar",
-                "code" => "XCD",
-            ],
-            "XDR" => [
-                "name" => "Special drawing rights",
-                "code" => "XDR",
-            ],
-            "XOF" => [
-                "name" => "CFA Franc BCEAO",
-                "code" => "XOF",
-            ],
-            "XPF" => [
-                "name" => "CFP Franc",
-                "code" => "XPF",
-            ],
-            "YER" => [
-                "name" => "Yemeni Rial",
-                "code" => "YER",
-            ],
-            "ZAR" => [
-                "name" => "South African Rand",
-                "code" => "ZAR",
-            ],
-            "ZMK" => [
-                "name" => "Zambian Kwacha",
-                "code" => "ZMK",
-            ],
-            "ZMW" => [
-                "name" => "Zambian Kwacha",
-                "code" => "ZMW",
-            ],
-            "ZWL" => [
-                "name" => "Zimbabwean dollar",
-                "code" => "ZWL",
-            ]
-        ];
-    }
-
     protected function validateLine($record, $results) {
 
         $record['company_id'] = $this->companyId;
@@ -1401,24 +732,33 @@ class CSVBulkImport implements ShouldQueue
         return [$customFieldsInCsvData, $availableCustomFieldValues];
     }
 
-    protected function updateRecord($record, $results) {
+    protected function updateRecord($record, $results, $optData) {
         $status = 'error';
-
+        $updateErrors = [];
         $id = $record['id'];
-        $optData = get_transient('import_' . $this->csvId);
 
         //Update opt_status with the value from the modal if field is empty
-        if ($optData && count($optData) > 0 && empty($csv_data_item['opt_status'])) {
+        if ($optData && count($optData) > 0 && empty($record['opt_status'])) {
             $record['opt_status'] = $optData['opt_status'];
         }
 
         switch ($this->importType) {
             case 'Contacts': {
                 $row = Contact::find($id);
+                $updateErrors = [
+                    'field' => 'email_address',
+                    'message' => 'There was an error updating a contact with this email address',
+                    'value' => $record['email_address']
+                ];
                 break;
             }
             case 'Accounts': {
                 $row = Account::find($id);
+                $updateErrors = [
+                    'field' => 'name',
+                    'message' => 'An account with this name already exists',
+                    'value' => $record['name']
+                ];
                 break;
             }
             case 'Opportunities': {
@@ -1427,12 +767,21 @@ class CSVBulkImport implements ShouldQueue
             }
         }
 
-        $row->fill($record);
-        $updated = $row->save();
+        $updated = $row->update($record);
 
         $status = $updated ? 'updated' : $status;
 
-        /** set message when status remains in error */
+        if($status === 'error') {
+            if(in_array($this->importType, ['Contacts', 'Accounts'])) {
+                $results['field_error'][] = [
+                    'field' => $updateErrors['field'],
+                    'message' => $updateErrors['message'],
+                    'value' => $updateErrors['value'],
+                    'row' => $this->lineIndex
+                ];
+            }
+        }
+
         //---- Save / update custom fields
         $createdCustomFields = $this->saveCustomFields($record, $id);
 
@@ -1448,6 +797,7 @@ class CSVBulkImport implements ShouldQueue
                 }
             }
         }
+
         $results['rows'][] = [
             'status' => $status,
             'id' => $id,
@@ -1460,8 +810,99 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function insertRecord($record, $results) {
+    protected function insertRecord($record, $results, $optData) {
+        $status = 'error';
+        $objectType = $this->defaultTables[$this->importType]['object_type'];
 
+        if (array_search($objectType, ['contact', 'opportunity'])) {
+            // Check if account name exists in db to set account_id in register
+            if (isset($record['account'])) {
+                $accountId = Account::where('company_id', '=', $this->companyId)
+                    ->whereRaw("name = '{$record['account']}'")
+                    ->select('id')
+                    ->first();
+
+                if ($accountId) {
+                    $record['account_id'] = $accountId;
+                }
+            }
+        }
+
+        if ($objectType == 'contact') {
+            $optData = get_transient('import_' . $this->csvId);
+            if ($optData && count($optData) > 0 && empty($record['opt_status'])) {
+                $record['opt_status'] = $optData['opt_status'];
+            }
+
+            if(!isset($record['account_id'])) {
+                $accountId = Account::where('company_id', '=', $this->companyId)
+                    ->whereRaw("website LIKE ''")
+                    ->select('id')
+                    ->first();
+
+                $record['account_id'] = $accountId;
+            }
+        }
+
+        switch ($this->importType) {
+            case 'Contacts': {
+                $row = new Contact();
+                break;
+            }
+            case 'Accounts': {
+                $row = new Account();
+                break;
+            }
+            case 'Opportunities': {
+                $row = new Opportunity();
+                break;
+            }
+        }
+
+        $row->fill($record);
+        $element = $row->save();
+
+        $status = ($element) ? 'created' : $status;
+        $record['íd'] = $element->id;
+
+        //---- Save / update custom fields
+        $createdCustomFields = $this->saveCustomFields($record, $record['íd']);
+        if (!empty($createdCustomFields)) {
+            foreach ($createdCustomFields as $key => $customField) {
+                if ($customField['status'] == 'error') {
+                    $this->fieldErrors[] = [
+                        'field' => $customField['field'],
+                        'message' => "Invalid {$customField['field']}",
+                        'value' => $customField['value'],
+                        'row' => $key
+                    ];
+                }
+            }
+        }
+
+        if ($element) {
+            $record['imported'] = 1;
+
+            try {
+                if ($objectType == 'contact') {
+                    $this->CSVBulkImportService->ksCreateContactActivity($record, $element->id, $status, null);
+                } else if ($objectType == 'account') {
+                    $this->CSVBulkImportService->ksCreateAccountActivity($record, $element->id, $status);
+                } else {
+                    $this->CSVBulkImportService->ksCreateOpportunityActivity($record, $element->id, $status);
+                }
+            } catch (\Throwable $e) {
+                error_log($e->getMessage());
+            }
+        }
+
+        $results['rows'][] = [
+            'status' => $status,
+            'custom_fields' => $createdCustomFields ?? [],
+            'id' => $record['íd'] ?? ''
+        ];
+
+        return [$record, $results];
     }
 
     protected function saveCustomFields($record, $id) {
@@ -1499,8 +940,7 @@ class CSVBulkImport implements ShouldQueue
                     if ($row->value == $customFieldRow['value']) {
                         continue;
                     }
-                    $row->fill($customFieldRow);
-                    $updated = $row->save();
+                    $updated = $row->update($customFieldRow);
 
                     $status = $updated ? 'updated' : $status;
                 } else {
@@ -1523,8 +963,7 @@ class CSVBulkImport implements ShouldQueue
                         }
                     }
 
-                    $row->fill($customFieldRow);
-                    $row->save();
+                    $row->update($customFieldRow);
 
                     $status = $row->id ? 'created' : $status;
                 }

@@ -8,8 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 class MarketingEmails extends Model
 {
     use HasFactory;
-
+    
     protected $table = 'wp_ks_marketing_emails';
+    public $timestamps = false;
 
     /**
      * The attributes that are mass assignable.

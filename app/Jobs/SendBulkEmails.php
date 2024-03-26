@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\MarketingEmails;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,6 +20,8 @@ class SendBulkEmails implements ShouldQueue
 
     private int $companyId;
 
+    private int $batchId;
+
     private string $sendgridApiKey;
 
     private string $primaryMarketingEmail;
@@ -28,13 +31,16 @@ class SendBulkEmails implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(int $companyId, array $marketingEmailIds)
+    public function __construct(int $companyId, array $marketingEmailIds, int $batchId)
     {
         // Set company ID
         $this->companyId = $companyId;
 
         // Set marketing email IDs
         $this->marketingEmailIds = $marketingEmailIds;
+
+        // Set batch ID
+        $this->batchId = $batchId;
 
         // Get BD tables prefix (Wordpress tables)
         $this->dbPrefix = env('DB_WP_TABLES_PREFIX') ?? 'wp_';
@@ -60,6 +66,7 @@ class SendBulkEmails implements ShouldQueue
             $emailsToSend = $this->getMarketingEmails();
 
             $sentEmails = [];
+            $totalEmailsSend = 0;
             foreach ($emailsToSend as $emailToSend) {
                 $email = new \SendGrid\Mail\Mail();
 
@@ -79,15 +86,35 @@ class SendBulkEmails implements ShouldQueue
                 $resp = $sendgrid->send($email);
                 if ($resp->statusCode() == 202) {
                     $sentEmails[] = $emailToSend->id;
+                    $totalEmailsSend++;
                 } else {
                     Log::error("Error sending email {$emailToSend->id} to {$emailToSend->email_address}");
                 }
             }
 
-            // Update email status (one single query)
-            DB::table($this->dbPrefix . 'ks_marketing_emails')
-                ->whereIn('id', $sentEmails)
+            MarketingEmails::whereIn('id', $sentEmails)
                 ->update(['status' => 'success', 'sent_at' => now()]);
+
+            //Update emails_sent meta
+            $existingMeta = DB::table('wp_postmeta')
+                ->where('post_id', $emailToSend->company_id)
+                ->where('meta_key', 'emails_sent')
+                ->first();
+
+            if ($existingMeta) {
+                $sum = $existingMeta->meta_value + $totalEmailsSend;
+                DB::table('wp_postmeta')
+                    ->where('post_id', $emailToSend->company_id)
+                    ->where('meta_key', 'emails_sent')
+                    ->update(['meta_value' => $sum]);
+
+            } else {
+                DB::table('wp_postmeta')->insert([
+                    'post_id' => $emailToSend->company_id,
+                    'meta_key' => 'emails_sent',
+                    'meta_value' => $totalEmailsSend,
+                ]);
+            }
 
             // TODO: Update email limit, notifications, etc. and log the result (see wordpress repository, file: wp-content/themes/CFtheme/framework/classes/Emails.php:363)
         } catch (\Throwable $th) {
@@ -123,6 +150,7 @@ class SendBulkEmails implements ShouldQueue
                 ->join($this->dbPrefix . 'posts as p','me.company_id', '=', 'p.ID')
             ->where('me.company_id', $this->companyId)
             ->whereIn('me.id', $this->marketingEmailIds)
+            ->where('me.batch', $this->batchId)
             ->where('me.sent_at', null)
             ->get();
     }

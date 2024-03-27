@@ -39,6 +39,7 @@ class CSVBulkImport implements ShouldQueue
     protected $tableSchema;
     protected $lineIndex;
     protected $objectTypeOptions;
+    protected $optData;
     protected $isValid;
     protected $fieldRulesFormatted;
     protected $notNullColumns;
@@ -65,6 +66,14 @@ class CSVBulkImport implements ShouldQueue
         $this->companyId = $params['companyId'];
         $this->userId = $params['userId'];
         $this->csvId = $params['csvId'];
+        if($params['opt_status'] != null) {
+            $this->optData = [
+                'opt_status' => $params['opt_status'],
+                'full_name' => $params['opt_full_name']
+            ];
+        } else {
+            $this->optData = [];
+        }
         $this->listId = null;
         $this->tableSchema = env('DB_DATABASE');
         $this->wpDbPrefix = env('DB_WP_TABLES_PREFIX', 'wp_');
@@ -139,17 +148,6 @@ class CSVBulkImport implements ShouldQueue
                 'options' => []
             ]
         ];
-
-        $this->isValid = collect([
-            'column' => true,
-            'foreignRecord' => true,
-            'userField' => true,
-            'typeField' => true,
-            'currencyField' => true,
-            'customFields' => true,
-            'dateField' => true,
-            'emailField' => true
-        ]);
     }
 
     /**
@@ -160,25 +158,23 @@ class CSVBulkImport implements ShouldQueue
     public function handle()
     {
         $csvFile = fopen("{$this->fileName}", "r");
-        $successImportFile = substr($this->fileName, 0, -4) . "-success.csv";
-        $failedImportFile = substr($this->fileName, 0, -4) . "-failed.csv";
+        $successImportFile = substr($this->fileName, 0, -4) . "-success.json";
+        $failedImportFile = substr($this->fileName, 0, -4) . "-failed.json";
         Log::info("Success File Name: $successImportFile");
         Log::info("Failed File Name: $failedImportFile");
         $successFile = fopen("{$successImportFile}", "a+");
         $failedFile = fopen("{$failedImportFile}", "a+");
 
-        $this->getFieldsDefinition();
+        $listIdIndex = null;
 
         for($this->lineIndex = 1; $line = fgetcsv($csvFile); $this->lineIndex++) {
             if ($this->lineIndex == 1) {
                 [$this->customFieldsInCsvData, $this->availableCustomFieldValues] = $this->getMetaValuesInCsv($line);
+                if(in_array('list_id', $line)) {
+                    $listIdIndex = array_search('list_id', $line);
+                }
             } elseif ($this->lineIndex >= $this->offSet && $this->lineIndex < $this->numberOfRecords) {
-                $record = $this->fillCommonInformation($line, $this->defaultFields[$this->importType]);
-                [$this->fieldRulesFormatted, $this->notNullColumns, $this->optionalForeignKeys, $this->nullColumns] = $this->getFieldsDefinition();
-                $results = $this->makeFieldsValidation();
-
-                $this->customFieldsToSave = [];
-                $this->isValid = collect([
+                $this->isValid = [
                     'column' => true,
                     'foreignRecord' => true,
                     'userField' => true,
@@ -187,7 +183,13 @@ class CSVBulkImport implements ShouldQueue
                     'customFields' => true,
                     'dateField' => true,
                     'emailField' => true
-                ]);
+                ];
+                $this->listId = ($listIdIndex !== null) ? $line[$listIdIndex] : null;
+                $mapFields = array_merge($this->fieldsMap, $this->defaultFields[$this->importType]);
+                [$this->fieldRulesFormatted, $this->notNullColumns, $this->optionalForeignKeys, $this->nullColumns] = $this->getFieldsDefinition($mapFields);
+
+                $record = $this->fillCommonInformation($line, $mapFields);
+                $results = $this->makeFieldsValidation();
 
                 switch ($this->importType) {
                     case 'Contacts': {
@@ -204,20 +206,22 @@ class CSVBulkImport implements ShouldQueue
                     }
                 }
 
+                $this->customFieldsToSave = [];
                 [$record, $results] = $this->validateLine($record, $results);
 
                 // ---- Set error and skip row if it's invalid
                 if (
-                    !$this->isValid->column || !$this->isValid->foreignRrecord ||
-                    !$this->isValid->userField || !$this->isValid->typeField ||
-                    !$this->isValid->customFields || !$this->isValid->dateField ||
-                    !$this->isValid->currencyField || !$this->isValid->emailField
+                    !$this->isValid['column'] || !$this->isValid['foreignRecord'] ||
+                    !$this->isValid['userField'] || !$this->isValid['typeField'] ||
+                    !$this->isValid['customFields'] || !$this->isValid['dateField'] ||
+                    !$this->isValid['currencyField'] || !$this->isValid['emailField']
                 ) {
                     $results['rows'][] = [
                         'status' => 'error',
                         'id' => $record['id'] ?? '',
                         'custom_fields' => [],
                     ];
+                    fwrite($failedFile, json_encode($results) . "\n"); // Add more fields as needed
                     continue;
                 };
 
@@ -228,24 +232,24 @@ class CSVBulkImport implements ShouldQueue
                 }
 
                 if ($this->defaultTables[$this->importType]['object_type'] === 'contact') {
-                    $query->whereRaw("email_address = '{$record['email_address']}");
+                    $query->whereRaw("email_address = '{$record['email_address']}'");
                 } elseif ($this->defaultTables[$this->importType]['object_type'] === 'account') {
-                    $query->whereRaw("name = '{$record['name']}");
+                    $query->whereRaw("name = '{$record['name']}'");
                 }
 
                 $element = $query->where('company_id', '=', $this->companyId)
                 ->select('id')
                 ->first();
 
-                $optData = get_transient('import_' . $this->csvId);
-
+                fwrite($successFile, json_encode($record) . "\n"); // Add more fields as needed
+                fwrite($failedFile, json_encode($results) . "\n"); // Add more fields as needed
                 // ---- Update record if ID exist
-                if ($element) {
+                /*if ($element) {
                     $record['id'] = $element->id;
-                    [$record, $results] = $this->updateRecord($record, $results, $optData);
+                    [$record, $results] = $this->updateRecord($record, $results);
                 } else {
-                    [$record, $results] = $this->insertRecord($record, $results, $optData);
-                }
+                    [$record, $results] = $this->insertRecord($record, $results);
+                }*/
 
             }
         }
@@ -261,7 +265,7 @@ class CSVBulkImport implements ShouldQueue
                     'value' => $record['email_address'],
                     'row' => $this->lineIndex
                 ];
-                $this->isValid->emailField = false;
+                $this->isValid['emailField'] = false;
             }
         }
 
@@ -301,7 +305,7 @@ class CSVBulkImport implements ShouldQueue
                     'value' => $record['currency'],
                     'row' => $this->lineIndex
                 ];
-                $this->isValid->currencyField = false;
+                $this->isValid['currencyField'] = false;
             }
         }
 
@@ -365,7 +369,7 @@ class CSVBulkImport implements ShouldQueue
                     'value' => $record['close_date'],
                     'row' => $this->lineIndex
                 ];
-                $this->isValid->dateField = false;
+                $this->isValid['dateField'] = false;
             } else {
                 $record['close_date'] = date('Y-m-d', strtotime($record['close_date']));
             }
@@ -379,7 +383,7 @@ class CSVBulkImport implements ShouldQueue
                 'value' => $record['account_id'] ?? '',
                 'row' => $this->lineIndex
             ];
-            $this->isValid->foreignRecord = false;
+            $this->isValid['foreignRecord'] = false;
         }
 
         //--- Validate contact_id field from opportunity
@@ -390,10 +394,10 @@ class CSVBulkImport implements ShouldQueue
                 'value' => $record['contact_id'] ?? '',
                 'row' => $this->lineIndex
             ];
-            $this->isValid->foreignRecord = false;
+            $this->isValid['foreignRecord'] = false;
         }
 
-        if ($this->isValid->foreignRecord) {
+        if ($this->isValid['foreignRecord']) {
             //--- Validate contact_id belongs to account_id from opportunity
             if (key_exists('contact_id', $record) && key_exists('account_id', $record)) {
 
@@ -414,7 +418,7 @@ class CSVBulkImport implements ShouldQueue
                         'value' => $record['contact_id'],
                         'row' => $this->lineIndex
                     ];
-                    $this->isValid->foreignRecord = false;
+                    $this->isValid['foreignRecord'] = false;
                 }
             }
         }
@@ -430,12 +434,13 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function fillCommonInformation($line, $defaultFields) {
+    protected function fillCommonInformation($line, $mapFields) {
         $newRow= [];
 
+        $defaultFields = $this->defaultFields[$this->importType];
         foreach ($line as $key => $value) {
-            if ($this->fieldsMap[$key] != 'Skip this field') {
-                $newRow[$this->fieldsMap[$key]] = trim(str_replace('"', '', $value));
+            if ($mapFields[$key] != 'Skip this field') {
+                $newRow[$mapFields[$key]] = trim(str_replace('"', '', $value));
             }
         }
 
@@ -467,7 +472,7 @@ class CSVBulkImport implements ShouldQueue
         return $newRow;
     }
 
-    protected function getFieldsDefinition() {
+    protected function getFieldsDefinition($mapFields) {
         $this->fieldRules = DB::TABLE("INFORMATION_SCHEMA.COLUMNS")
             ->whereRaw("TABLE_SCHEMA = '$this->tableSchema'")
             ->whereRaw("TABLE_NAME = '{$this->defaultTables[$this->importType]['table']}'")
@@ -494,8 +499,8 @@ class CSVBulkImport implements ShouldQueue
             }
         }
 
-        /** system checks which fields from the line mapping are missing by removing the one that are optionals */
-        $nullColumns = array_diff($notNullColumns, $this->fieldsMap);
+        /** system checks which fields from the line mapping are missing by removing the ones that are optionals */
+        $nullColumns = array_diff($notNullColumns, $mapFields);
         $nullColumns = array_values($nullColumns);
         if (in_array('id', $nullColumns) !== false) {
             unset($nullColumns[array_search('id', $nullColumns)]);
@@ -520,7 +525,6 @@ class CSVBulkImport implements ShouldQueue
                     'message' => "Missing $column column",
                     'value' => "",
                     'row' => "",
-                    'fileLine' => 0
                 ];
 
                 $results['rows'][] = [
@@ -537,6 +541,7 @@ class CSVBulkImport implements ShouldQueue
     protected function validateLine($record, $results) {
 
         $record['company_id'] = $this->companyId;
+        $objectType = $this->defaultTables[$this->importType]['object_type'];
 
         foreach ($record as $key => $value) {
             if (str_contains(',', $value)) {
@@ -550,14 +555,15 @@ class CSVBulkImport implements ShouldQueue
         // ---- Check blank values in not null columns
         foreach ($this->notNullColumns as $column) {
             if ($column != 'id') {
-                if ((empty($$record[$column]) || !isset($record[$column])) && $record[$column] !== 0) {
+
+                if (!isset($record[$column]) && $record[$column] !== 0) {
                     $results['field_error'][] = [
                         'field' => $column,
                         'message' => "Invalid $column",
                         'value' => "",
                         'row' => $this->lineIndex
                     ];
-                    $this->isValid->column = false;
+                    $this->isValid['column'] = false;
                 }
             }
         }
@@ -575,7 +581,7 @@ class CSVBulkImport implements ShouldQueue
         if (!empty($foreignRecordsCheck)) {
             foreach ($foreignRecordsCheck as $foreignRecord) {
 
-                if($this->defaultTables[$this->importType]['object_type'] === 'opportunity' && $foreignRecord['field'] === 'contact_id') {
+                if($objectType === 'opportunity' && $foreignRecord['field'] === 'contact_id') {
                     continue;
                 } else {
                     if (!$foreignRecord['exist']) {
@@ -585,15 +591,15 @@ class CSVBulkImport implements ShouldQueue
                             'value' => $foreignRecord['id'],
                             'row' => $this->lineIndex
                         ];
-                        $this->isValid->foreignRecord = false;
+                        $this->isValid['foreignRecord'] = false;
                     }
                 }
             }
         }
 
         //---- Validate object type options
-        $objectTypeField = $this->objectTypeOptions[$this->importType]['field'];
-        $objectTypeOptions = $this->objectTypeOptions[$this->importType]['options'];
+        $objectTypeField = $this->objectTypeOptions[$objectType]['field'];
+        $objectTypeOptions = $this->objectTypeOptions[$objectType]['options'];
         if (key_exists($objectTypeField, $record)) {
             if (!in_array($record[$objectTypeField], $objectTypeOptions)) {
                 $results['field_error'][] = [
@@ -602,7 +608,7 @@ class CSVBulkImport implements ShouldQueue
                     'value' => $record[$objectTypeField],
                     'row' => $this->lineIndex
                 ];
-                $this->isValid->typeField = false;
+                $this->isValid['typeField'] = false;
             }
         }
 
@@ -616,7 +622,7 @@ class CSVBulkImport implements ShouldQueue
                         'row' => $this->lineIndex
                     ];
                     unset($record[$value['name']]);
-                    $this->isValid->customFields = false;
+                    $this->isValid['customFields'] = false;
                     continue;
                 }
             }
@@ -633,7 +639,7 @@ class CSVBulkImport implements ShouldQueue
                         'row' => $this->lineIndex
                     ];
                     unset($record[$value['name']]);
-                    $this->isValid->dateField = false;
+                    $this->isValid['dateField'] = false;
                     continue;
                 }
             }
@@ -642,12 +648,12 @@ class CSVBulkImport implements ShouldQueue
                 'name' => $value['name'],
                 'value' => $record[$value['name']],
                 'last_modified' => date('Y-m-d H:i:s'),
-                'last_modified_by' => $new_row['user_id'] ?? 0
+                'last_modified_by' => $record['user_id'] ?? 0
             ];
 
-            if (key_exists($value['name'], $record)) {
+            /*if (key_exists($value['name'], $record)) {
                 unset($record[$value['name']]);
-            }
+            }*/
         }
 
         return [
@@ -705,7 +711,7 @@ class CSVBulkImport implements ShouldQueue
         // Format custom fields
         $customFieldsFormatted = [];
         if (!empty($customFields)) {
-            $customFields = json_decode($customFields['setting_value']);
+            $customFields = json_decode($customFields->setting_value);
             foreach ($customFields as $field) {
                 if (!key_exists($field->type, $availableCustomFieldValues) &&
                     in_array($field->type, ['Radio', 'Dropdown', 'Checkbox', 'Multi-select'])
@@ -732,14 +738,14 @@ class CSVBulkImport implements ShouldQueue
         return [$customFieldsInCsvData, $availableCustomFieldValues];
     }
 
-    protected function updateRecord($record, $results, $optData) {
+    protected function updateRecord($record, $results) {
         $status = 'error';
         $updateErrors = [];
         $id = $record['id'];
 
         //Update opt_status with the value from the modal if field is empty
-        if ($optData && count($optData) > 0 && empty($record['opt_status'])) {
-            $record['opt_status'] = $optData['opt_status'];
+        if ($this->optData && count($this->optData) > 0 && empty($record['opt_status'])) {
+            $record['opt_status'] = $this->optData['opt_status'];
         }
 
         switch ($this->importType) {
@@ -810,7 +816,7 @@ class CSVBulkImport implements ShouldQueue
         ];
     }
 
-    protected function insertRecord($record, $results, $optData) {
+    protected function insertRecord($record, $results) {
         $status = 'error';
         $objectType = $this->defaultTables[$this->importType]['object_type'];
 
@@ -829,9 +835,8 @@ class CSVBulkImport implements ShouldQueue
         }
 
         if ($objectType == 'contact') {
-            $optData = get_transient('import_' . $this->csvId);
-            if ($optData && count($optData) > 0 && empty($record['opt_status'])) {
-                $record['opt_status'] = $optData['opt_status'];
+            if ($this->optData && count($this->optData) > 0 && empty($record['opt_status'])) {
+                $record['opt_status'] = $this->optData['opt_status'];
             }
 
             if(!isset($record['account_id'])) {

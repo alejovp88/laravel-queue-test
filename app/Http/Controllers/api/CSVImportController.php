@@ -6,6 +6,7 @@ use App\Http\Controllers\ApiController;
 use App\Models\CSVImport;
 use App\Jobs\CSVBulkImport;
 
+use App\Services\CSVBulkImportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -19,6 +20,7 @@ class CSVImportController extends ApiController
 
     function importCSV($companyId) {
         $lineCounter = 0;
+        $CSVBulkImportService = new CSVBulkImportService();
         $query = CSVImport::query();
 
         $query->where('company_id', '=', $companyId)
@@ -57,17 +59,17 @@ class CSVImportController extends ApiController
             Log::info("Total CSV lines: $lineCounter");
             if($lineCounter <= $this->lowImportAmount) {
                 Log::info("Low Import Queue Selected");
-                dispatch(new CSVBulkImport($jobParams))->onQueue('csv-low');
+                dispatch(new CSVBulkImport($jobParams, $CSVBulkImportService))->onQueue('csv-low');
             } elseif ($lineCounter <= $this->midImportAmount) {
                 Log::info("Medium Import Queue Selected");
-                dispatch(new CSVBulkImport($jobParams))->onQueue('csv-medium');
+                dispatch(new CSVBulkImport($jobParams, $CSVBulkImportService))->onQueue('csv-medium');
             } else {
                 Log::info("High Import Queue Selected");
                 $recordsPerQueue = ceil($lineCounter/$this->highImportQueuesNumber);
                 for ($queue = 0; $queue < $this->highImportQueuesNumber; $queue++) {
                     $offset = ($queue * $recordsPerQueue) + $this->excludeHeaderOffset;
                     $jobParams['offSet'] = $offset;
-                    dispatch(new CSVBulkImport($jobParams))->onQueue("csv-high-{$queue}");
+                    dispatch(new CSVBulkImport($jobParams, $CSVBulkImportService))->onQueue("csv-high-{$queue}");
                 }
             }
         } else {

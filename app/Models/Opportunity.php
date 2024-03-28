@@ -29,4 +29,18 @@ class Opportunity extends Model
 
     public $timestamps = false;
 
+    public function getStages($id = null, $companyId = null) {
+
+        $query = $this::query();
+        if($id) {
+            $query->where('id', '=', $id);
+        } elseif ($companyId) {
+            $query->where('company_id', '=', $companyId);
+        }
+        $query->select('*')
+            ->orderBy('position', 'ASC');
+
+        return $query->get();
+    }
+
 }

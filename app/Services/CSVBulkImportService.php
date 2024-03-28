@@ -2,27 +2,38 @@
 
 namespace App\Services;
 
+use App\Models\Account;
+use App\Models\AccountMeta;
+use App\Models\Contact;
+use App\Models\ContactMeta;
+use App\Models\Opportunity;
+use App\Models\OpportunityMeta;
+
 class CSVBulkImportService
 {
-    public function ksCreateContactActivity($contactInfo, $contact_id, $action, $user_id = '', $viaSync = false) {
-        if (is_null($user_id)) {
+    protected $userService;
+    protected $ksActivityService;
+    public function __construct(UserService $userService, KSActivityService $ksActivityService) {
+        $this->userService = $userService;
+        $this->ksActivityService = $ksActivityService;
+    }
+
+    public function ksCreateContactActivity($contactInfo, $contactId, $action, $userId = '', $viaSync = false) {
+        if (is_null($userId)) {
             $userInfo['user_id'] = 0;
             $userInfo['company_id'] = $contactInfo['company_id'] ?? 0;
         } else {
-            $user = new KS_Users();
-            $userInfo = $user->ks_current_user_info($user_id);
+            $userInfo = $this->userService->ksCurrentUserInfo($userId);
         }
-
-        $activity = new KS_Activities();
 
         if ($action == 'updated') {
             $value = "";
-            $sql = "SELECT * FROM {$wpdb->prefix}ks_contacts WHERE id = '%d'";
-            $sql        = $wpdb->prepare($sql, $contact_id);
-            $currentContact = $wpdb->get_row($sql, ARRAY_A);
+            $currentContact = Contact::find($contactId)->toArray();
 
             foreach ($contactInfo as $key => $item) {
-                if ($key == 'last_modified' || $key == 'last_modified_by' || $key == 'custom' || $key == 'autotask_id' || $key == 'user_id') continue;
+                if (in_array($key, ['last_modified', 'last_modified_by', 'custom', 'autotask_id', 'user_id'])) {
+                    continue;
+                }
 
                 if ($item != $currentContact[$key]) {
                     $fieldUpdated = str_replace('_', ' ', ucwords($key, '_'));
@@ -49,28 +60,26 @@ class CSVBulkImportService
                     }
 
                     $info = [
-                        'post_id'    => $contact_id,
+                        'post_id'    => $contactId,
                         'field'      => $key,
                         'label'      => $label,
                         'value'      => $value,
                         'type'       => 'contact',
                         'created_by' => $userInfo['user_id'],
                         'company_id' => $userInfo['company_id'],
-                        'action'     => KS_Activities::UPDATE
+                        'action'     => $this->ksActivityService->UPDATE
                     ];
                     if ($viaSync) {
                         $info['source'] = 'Autotask';
                     }
 
-                    $activity->insert_crm_activity($info);
+                    $this->ksActivityService->insertCrmActivity($info);
 
                 }
             }
 
             if (isset($contactInfo['custom']) && count($contactInfo['custom']) > 0) {
-                $sql = "SELECT * FROM {$wpdb->prefix}ks_contacts_meta WHERE contact_id = '%d'";
-                $sql        = $wpdb->prepare($sql, $contact_id);
-                $currentMetaValues = $wpdb->get_results($sql, ARRAY_A);
+                $currentMetaValues = ContactMeta::where('contact_id', '=', $contactId)->get()->toArray();
 
                 foreach ($contactInfo['custom'] as $key => $meta) {
                     if (!is_array($meta)) {
@@ -99,17 +108,17 @@ class CSVBulkImportService
                         }
 
                         $info = [
-                            'post_id'    => $contact_id,
+                            'post_id'    => $contactId,
                             'field'      => $meta['name'],
                             'label'      => $label,
                             'value'      => $value,
                             'type'       => 'contact',
                             'created_by' => $userInfo['user_id'],
                             'company_id' => $userInfo['company_id'],
-                            'action'     => KS_Activities::UPDATE
+                            'action'     => $this->ksActivityService->UPDATE
                         ];
 
-                        $activity->insert_crm_activity($info);
+                        $this->ksActivityService->insertCrmActivity($info);
                     }
                 }
             }
@@ -125,38 +134,35 @@ class CSVBulkImportService
                 $label = 'Contact created via import';
             }
             $info = [
-                'post_id'    => $contact_id,
+                'post_id'    => $contactId,
                 'field'      => "",
                 'label'      => $label,
                 'value'      => "",
                 'type'       => 'contact',
                 'created_by' => $userInfo['user_id'],
                 'company_id' => $userInfo['company_id'],
-                'action'     => KS_Activities::CREATE
+                'action'     => $this->ksActivityService->CREATE
             ];
             if ($viaSync) {
                 $info['source'] = 'Autotask';
             }
 
-            return $activity->insert_crm_activity($info);
+            return $this->ksActivityService->insertCrmActivity($info);
         }
     }
 
-    public function ksCreateAccountActivity($accountInfo, $account_id, $action, $viaSync = false): array {
-        global $wpdb;
-        $user = new KS_Users();
-        $userInfo = $user->ks_current_user_info();
+    public function ksCreateAccountActivity($userId, $accountInfo, $accountId, $action, $viaSync = false): array {
+        $userInfo = $this->userService->ksCurrentUserInfo($userId);
         $userInfo['company_id'] = $accountInfo['company_id'] ?? $userInfo['company_id'];
-        $activity = new KS_Activities();
 
         if ($action == 'updated') {
             $value = "";
-            $sql = "SELECT * FROM {$wpdb->prefix}ks_accounts WHERE id = '%d'";
-            $sql        = $wpdb->prepare($sql, $account_id);
-            $currentAccount = $wpdb->get_row($sql, ARRAY_A);
+            $currentAccount = Account::find($accountId)->toArray();
 
             foreach ($accountInfo as $key => $item) {
-                if ($key == 'last_modified' || $key == 'last_modified_by' || $key == 'custom' || $key == 'autotask_id') continue;
+                if (in_array($key, ['last_modified', 'last_modified_by', 'custom', 'autotask_id'])) {
+                    continue;
+                }
 
                 if ($item != $currentAccount[$key]) {
                     $fieldUpdated = str_replace('_', ' ', ucwords($key, '_'));
@@ -171,27 +177,25 @@ class CSVBulkImportService
                     }
 
                     $info = [
-                        'post_id'    => $account_id,
+                        'post_id'    => $accountId,
                         'field'      => $key,
                         'label'      => $label,
                         'value'      => $value,
                         'type'       => 'account',
                         'created_by' => $userInfo['user_id'],
                         'company_id' => $userInfo['company_id'],
-                        'action'     => KS_Activities::UPDATE,
+                        'action'     => $this->ksActivityService->UPDATE,
                     ];
                     if ($viaSync) {
                         $info['source'] = 'Autotask';
                     }
 
-                    $activity->insert_crm_activity($info);
+                    $this->ksActivityService->insertCrmActivity($info);
                 }
             }
 
             if (isset($accountInfo['custom']) && count($accountInfo['custom']) > 0) {
-                $sql = "SELECT * FROM {$wpdb->prefix}ks_accounts_meta WHERE account_id = '%d'";
-                $sql        = $wpdb->prepare($sql, $account_id);
-                $currentMetaValues = $wpdb->get_results($sql, ARRAY_A);
+                $currentMetaValues = AccountMeta::where('account_id', '=', $accountId)->get()->toArray();
 
                 foreach ($accountInfo['custom'] as $key => $meta) {
                     $pos = array_search($meta['name'], array_column($currentMetaValues, 'name'));
@@ -217,17 +221,17 @@ class CSVBulkImportService
                         }
 
                         $info = [
-                            'post_id'    => $account_id,
+                            'post_id'    => $accountId,
                             'field'      => $meta['name'],
                             'label'      => $label,
                             'value'      => $value,
                             'type'       => 'account',
                             'created_by' => $userInfo['user_id'],
                             'company_id' => $userInfo['company_id'],
-                            'action'     => KS_Activities::UPDATE,
+                            'action'     => $this->ksActivityService->UPDATE,
                         ];
 
-                        $activity->insert_crm_activity($info);
+                        $this->ksActivityService->insertCrmActivity($info);
                     }
                 }
             }
@@ -242,42 +246,38 @@ class CSVBulkImportService
             }
 
             $info = [
-                'post_id'    => $account_id,
+                'post_id'    => $accountId,
                 'field'      => "",
                 'label'      => $label,
                 'value'      => "",
                 'type'       => 'account',
                 'created_by' => $userInfo['user_id'],
                 'company_id' => $userInfo['company_id'],
-                'action'     => KS_Activities::CREATE,
+                'action'     => $this->ksActivityService->CREATE,
             ];
             if ($viaSync) {
                 $info['source'] = 'Autotask';
             }
 
-            return $activity->insert_crm_activity($info);
+            return $this->ksActivityService->insertCrmActivity($info);
         }
     }
 
-    function ksCreateOpportunityActivity($opportunityInfo, $opportunity_id, $action): array
+    function ksCreateOpportunityActivity($userId, $opportunityInfo, $opportunityId, $action): array
     {
-        global $wpdb;
-        $user          = new KS_Users();
-        $userInfo      = $user->ks_current_user_info();
-        $KsOpportunity = new KS_Opportunity();
-        $activity      = new KS_Activities();
+        $userInfo      = $this->userService->ksCurrentUserInfo($userId);
 
-        $stage = $KsOpportunity->ks_get_stage_by_id($opportunityInfo['stage'], $opportunityInfo['company_id']);
+        $opportunity = new Opportunity();
+        $stage = $opportunity->getStages($opportunityInfo['stage'], $opportunityInfo['company_id'])->get(0);
         $amount = $opportunityInfo['amount'];
-        $company_id = $opportunityInfo['company_id'] ?? $userInfo['company_id'];
+        $companyId = $opportunityInfo['company_id'] ?? $userInfo['company_id'];
+
         if ($action == 'updated') {
             $value          = "";
-            $sql            = "SELECT * FROM {$wpdb->prefix}ks_opportunities WHERE id = '%d'";
-            $sql            = $wpdb->prepare($sql, $opportunity_id);
-            $currentAccount = $wpdb->get_row($sql, ARRAY_A);
+            $currentAccount = Opportunity::find($opportunityId)->toArray();
 
             foreach ($opportunityInfo as $key => $item) {
-                if ($key == 'last_modified' || $key == 'last_modified_by' || $key == 'custom') {
+                if (in_array($key, ['last_modified', 'last_modified_by', 'custom'])) {
                     continue;
                 }
 
@@ -293,33 +293,30 @@ class CSVBulkImportService
                             $values = [
                                 'created_by' => $userInfo['user_id'],
                                 "object"     => 'opportunity',
-                                "object_id"  => $opportunity_id,
+                                "object_id"  => $opportunityId,
                                 "action"     => '[username] closed the opportunity: [oppName] for a revenue of [amount]',
                                 "params"     => ['amount' => $amount],
-                                "company_id" => $company_id
+                                "company_id" => $companyId
                             ];
                         }else{
                             $values = [
                                 'created_by' => $userInfo['user_id'],
                                 "object"     => 'opportunity',
-                                "object_id"  => $opportunity_id,
+                                "object_id"  => $opportunityId,
                                 "action"     => '[username] moved the opportunity: [oppName] to '.$stage['stage_name'],
-                                "company_id" => $company_id
+                                "company_id" => $companyId
                             ];
                         }
                         /*
                         * generate the log for the dashboard component
                         */
-                        $activity->insert_activity_log($values);
+                        $this->ksActivityService->insertCrmActivity($values);
                     } elseif ($key == 'account_id') {
                         $label = "Account updated";
                     } elseif ($key == 'contact_id') {
                         $label = "Contact updated";
-                        $query = "SELECT first_name, last_name
-                                FROM {$wpdb->prefix}ks_contacts
-                                WHERE id = '%d'";
-                        $query = $wpdb->prepare($query, $value);
-                        $resp = $wpdb->get_row($query);
+
+                        $resp = Contact::find($value);
                         if (isset($resp)) {
                             $value = $resp->first_name . ' ' . $resp->last_name;
                         } else {
@@ -340,24 +337,22 @@ class CSVBulkImportService
                     }
 
                     $info = [
-                        'post_id'    => $opportunity_id,
+                        'post_id'    => $opportunityId,
                         'field'      => $key,
                         'label'      => $label,
                         'value'      => $value,
                         'type'       => 'opportunity',
                         'created_by' => $userInfo['user_id'],
-                        'company_id' => $company_id,
-                        'action'     => KS_Activities::UPDATE
+                        'company_id' => $companyId,
+                        'action'     => $this->ksActivityService->UPDATE
                     ];
 
-                    return $activity->insert_crm_activity($info);
+                    return $this->ksActivityService->insertCrmActivity($info);
                 }
             }
 
             if (isset($opportunityInfo['custom']) && count($opportunityInfo['custom']) > 0) {
-                $sql               = "SELECT * FROM {$wpdb->prefix}ks_opportunities_meta WHERE opportunity_id = '%d'";
-                $sql               = $wpdb->prepare($sql, $opportunity_id);
-                $currentMetaValues = $wpdb->get_results($sql, ARRAY_A);
+                $currentMetaValues = OpportunityMeta::where('opportunity_id', '=', $opportunityId)->get()->toArray();
 
                 foreach ($opportunityInfo['custom'] as $key => $meta) {
                     $pos = array_search($meta['name'], array_column($currentMetaValues, 'name'));
@@ -366,22 +361,22 @@ class CSVBulkImportService
                         $label = "{$meta['label']} updated";
                         $value = $meta['value'];
 
-                        if ($pos == false && ($value == "" || $value == null || $value == "0")) {
+                        if (!$pos && ($value == "" || $value == null || $value == "0")) {
                             continue;
                         }
 
                         $info  = [
-                            'post_id'    => $opportunity_id,
+                            'post_id'    => $opportunityId,
                             'field'      => $meta['name'],
                             'label'      => $label,
                             'value'      => $value,
                             'type'       => 'opportunity',
                             'created_by' => $userInfo['user_id'],
                             'company_id' => $userInfo['company_id'],
-                            'action'     => KS_Activities::UPDATE
+                            'action'     => $this->ksActivityService->UPDATE
                         ];
 
-                        $activity->insert_crm_activity($info);
+                        $this->ksActivityService->insertCrmActivity($info);
                     }
                 }
             }
@@ -396,29 +391,29 @@ class CSVBulkImportService
             }
 
             $info = [
-                'post_id'    => $opportunity_id,
+                'post_id'    => $opportunityId,
                 'field'      => "",
                 'label'      => $label,
                 'value'      => "",
                 'type'       => 'opportunity',
                 'created_by' => $userInfo['user_id'],
-                'company_id' => $company_id,
-                'action'     => KS_Activities::CREATE
+                'company_id' => $companyId,
+                'action'     => $this->ksActivityService->CREATE
             ];
 
             $values = [
                 'created_by' => $userInfo['user_id'],
                 "object"     => 'opportunity',
-                "object_id"  => $opportunity_id,
+                "object_id"  => $opportunityId,
                 "action"     => '[username] created a new opportunity: [oppName]',
-                "company_id" => $company_id
+                "company_id" => $companyId
             ];
             /*
             * generate the log for the dashboard component
             */
-            $activity->insert_activity_log($values);
+            $this->ksActivityService->insertActivityLog($values);
 
-            return $activity->insert_crm_activity($info);
+            return $this->ksActivityService->insertCrmActivity($info);
         }
     }
 

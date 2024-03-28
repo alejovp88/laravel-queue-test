@@ -9,6 +9,8 @@ use App\Models\ContactMeta;
 use App\Models\Opportunity;
 use App\Models\OpportunityMeta;
 use App\Services\CSVBulkImportService;
+use App\Services\KSActivityService;
+use App\Services\UserService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -56,7 +58,7 @@ class CSVBulkImport implements ShouldQueue
      *
      * @return void
      */
-    public function __construct($params, CSVBulkImportService $CSVBulkImportService)
+    public function __construct($params)
     {
         $this->importType = $params['importType'];
         $this->fileName = $params['fileName'];
@@ -77,7 +79,7 @@ class CSVBulkImport implements ShouldQueue
         $this->listId = null;
         $this->tableSchema = env('DB_DATABASE');
         $this->wpDbPrefix = env('DB_WP_TABLES_PREFIX', 'wp_');
-        $this->CSVBulkImportService = $CSVBulkImportService;
+        $this->CSVBulkImportService = new CSVBulkImportService(new UserService(), new KSActivityService() );
         $this->defaultTables = [
             'Contacts' => [
                 'table' => "{$this->wpDbPrefix}ks_contacts",
@@ -158,12 +160,8 @@ class CSVBulkImport implements ShouldQueue
     public function handle()
     {
         $csvFile = fopen("{$this->fileName}", "r");
-        $successImportFile = substr($this->fileName, 0, -4) . "-success.json";
-        $failedImportFile = substr($this->fileName, 0, -4) . "-failed.json";
-        Log::info("Success File Name: $successImportFile");
-        Log::info("Failed File Name: $failedImportFile");
-        $successFile = fopen("{$successImportFile}", "a+");
-        $failedFile = fopen("{$failedImportFile}", "a+");
+        $resultFileName = substr($this->fileName, 0, -4) . "-results.json";
+        $resultsFile = fopen("{$resultFileName}", "a+");
 
         $listIdIndex = null;
 
@@ -221,7 +219,7 @@ class CSVBulkImport implements ShouldQueue
                         'id' => $record['id'] ?? '',
                         'custom_fields' => [],
                     ];
-                    fwrite($failedFile, json_encode($results) . "\n"); // Add more fields as needed
+                    fwrite($resultsFile, json_encode($results) . "\n"); // Add more fields as needed
                     continue;
                 };
 
@@ -241,16 +239,32 @@ class CSVBulkImport implements ShouldQueue
                 ->select('id')
                 ->first();
 
-                fwrite($successFile, json_encode($record) . "\n"); // Add more fields as needed
-                fwrite($failedFile, json_encode($results) . "\n"); // Add more fields as needed
                 // ---- Update record if ID exist
-                /*if ($element) {
+                if ($element) {
                     $record['id'] = $element->id;
                     [$record, $results] = $this->updateRecord($record, $results);
                 } else {
                     [$record, $results] = $this->insertRecord($record, $results);
-                }*/
+                }
 
+                fwrite($resultsFile, json_encode($results) . "\n");
+
+                /*if (isset($this->optData['opt_status']) && $this->optData['opt_status'] == 'Opted-In' && $record['id'] != null) {
+                    $KsContact = new KS_Contact();
+                    //Create contact opt log
+                    $resp = $KsContact->insert_contact_opt_log([
+                        'contact_id' => $record['id'],
+                        'user_id' => $this->userId,
+                        'full_name' => $this->optData['full_name'],
+                        'company_id' => $this->companyId,
+                    ]);
+                }
+
+                // Add contact
+                if ($this->listId && $this->defaultTables[$this->importType]['object_type'] == 'contact') {
+                    $contactId = $ks_contact->get_contact_id_by_email($record['email_address'], $this->companyId);
+                    $ks_list->insert_multiple_contact_list([['list_id' => $this->listId, 'contact_id' => $contactId,]]);
+                }*/
             }
         }
     }
@@ -258,7 +272,7 @@ class CSVBulkImport implements ShouldQueue
     protected function validateContacts($record, $results) {
         if(key_exists('email_address', $record) && !empty($record['email_address'])){
             $validateEmail = filter_var($record['email_address'], FILTER_VALIDATE_EMAIL);
-            if($validateEmail) {
+            if($validateEmail === false) {
                 $results['field_error'][] = [
                     'field' => 'email_address',
                     'message' => 'Invalid email_address',
@@ -342,11 +356,8 @@ class CSVBulkImport implements ShouldQueue
             }
         }
 
-        $customStages = DB::table("{$this->defaultTables[$this->importType]['stages_table']}")
-            ->where('company_id', '=', $this->companyId)
-            ->select('*')
-            ->orderBy('position', 'ASC')
-            ->get();
+        $opportunity = new Opportunity();
+        $customStages = $opportunity->getStages(null, $this->companyId);
 
         if ($customStages) {
             $this->objectTypeOptions[$objectType]['options'] = array_map(function ($stage) {
@@ -651,9 +662,9 @@ class CSVBulkImport implements ShouldQueue
                 'last_modified_by' => $record['user_id'] ?? 0
             ];
 
-            /*if (key_exists($value['name'], $record)) {
+            if (key_exists($value['name'], $record)) {
                 unset($record[$value['name']]);
-            }*/
+            }
         }
 
         return [
@@ -868,7 +879,7 @@ class CSVBulkImport implements ShouldQueue
         $element = $row->save();
 
         $status = ($element) ? 'created' : $status;
-        $record['íd'] = $element->id;
+        $record['íd'] = $row->id;
 
         //---- Save / update custom fields
         $createdCustomFields = $this->saveCustomFields($record, $record['íd']);
@@ -890,14 +901,18 @@ class CSVBulkImport implements ShouldQueue
 
             try {
                 if ($objectType == 'contact') {
-                    $this->CSVBulkImportService->ksCreateContactActivity($record, $element->id, $status, null);
-                } else if ($objectType == 'account') {
-                    $this->CSVBulkImportService->ksCreateAccountActivity($record, $element->id, $status);
-                } else {
-                    $this->CSVBulkImportService->ksCreateOpportunityActivity($record, $element->id, $status);
+                    $this->CSVBulkImportService->ksCreateContactActivity($record, $row->id, $status, $this->userId);
+                } elseif ($objectType == 'account') {
+                    $this->CSVBulkImportService->ksCreateAccountActivity($this->userId, $record, $row->id, $status);
+                } elseif ($objectType == 'opportunity') {
+                    $this->CSVBulkImportService->ksCreateOpportunityActivity($this->userId, $record, $row->id, $status);
                 }
             } catch (\Throwable $e) {
-                error_log($e->getMessage());
+                Log::error(json_encode([
+                    'csvId' => $this->csvId,
+                    'csvLine' => $this->lineIndex,
+                    "errorMessage" => $e->getMessage()
+                ]));
             }
         }
 

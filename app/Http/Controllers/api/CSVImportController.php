@@ -30,22 +30,26 @@ class CSVImportController extends ApiController
                 'type',
                 'user_id',
                 'results',
-                'id'/*,
+                'id',
                 'opt_status',
-                'opt_full_name'*/
+                'opt_full_name'
             ]);
 
         $record = $query->first();
 
         if($record) {
-            //$fileName = "{$record->csv_file}/{$record->name}";
             $fileName = "{$record->csv_file}";
             $csvFile = fopen($fileName, "r");
             $userId = $record->user_id;
 
             for($i = 1; fgetcsv($csvFile); $i++) {
-                $lineCounter++;
+                if($i > 1) { //excludes the header line
+                    $lineCounter++;
+                }
             }
+
+            $record->total_records = $lineCounter;
+            $record->save();
 
             if($lineCounter > 0) {
                 $jobParams = [
@@ -57,8 +61,8 @@ class CSVImportController extends ApiController
                     'companyId' => $companyId,
                     'userId' => $userId,
                     'csvId' => $record->id,
-                    'opt_status' => 'Opted-In',//$record->opt_status,
-                    'opt_full_name' => 'Alejandro Vargas'//$record->opt_full_name
+                    'opt_status' => $record->opt_status,
+                    'opt_full_name' => $record->opt_full_name
                 ];
 
                 Log::info("Total CSV lines: $lineCounter");

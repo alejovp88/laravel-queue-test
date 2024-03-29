@@ -10,6 +10,8 @@ class Account extends Model
     use HasFactory;
 
     protected $table = "wp_ks_accounts";
+    protected $metaTable = "wp_ks_accounts_meta";
+    protected $objectType = 'account';
 
     protected $fillable = [
         'company_id',
@@ -35,4 +37,16 @@ class Account extends Model
     ];
 
     public $timestamps = false;
+
+    public function getTableName() {
+        return $this->table;
+    }
+
+    public function getObjectInfo() {
+        return [
+            'table' => $this->table,
+            'meta_table' => $this->metaTable,
+            'object_type' => $this->objectType
+        ];
+    }
 }

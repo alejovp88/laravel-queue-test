@@ -20,7 +20,14 @@ class CSVImport extends Model
         'field_map',
         'csv_file',
         'results',
+        'total_records',
+        'fail_records',
+        'success_records',
+        'opt_full_name',
+        'opt_status',
         'timestamp',
         'displayed_notification'
     ];
+
+    public $timestamps = false;
 }

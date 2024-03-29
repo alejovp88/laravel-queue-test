@@ -10,6 +10,9 @@ class Opportunity extends Model
     use HasFactory;
 
     protected $table = "wp_ks_opportunities";
+    protected $metaTable = "wp_ks_opportunities_meta";
+    protected $stages = "wp_ks_crm_opportunities_stages";
+    protected $objectType = 'opportunity';
 
     protected $fillable = [
         'company_id',
@@ -43,4 +46,16 @@ class Opportunity extends Model
         return $query->get();
     }
 
+    public function getTableName() {
+        return $this->table;
+    }
+
+    public function getObjectInfo() {
+        return [
+            'table' => $this->table,
+            'meta_table' => $this->metaTable,
+            'stages_table' => $this->stages,
+            'object_type' => $this->objectType
+        ];
+    }
 }

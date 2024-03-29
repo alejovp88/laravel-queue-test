@@ -6,10 +6,12 @@ use App\Models\Account;
 use App\Models\AccountMeta;
 use App\Models\Contact;
 use App\Models\ContactMeta;
+use App\Models\CSVImport;
 use App\Models\Opportunity;
 use App\Models\OpportunityMeta;
 use App\Services\CSVBulkImportService;
 use App\Services\KSActivityService;
+use App\Services\ListService;
 use App\Services\UserService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -79,7 +81,7 @@ class CSVBulkImport implements ShouldQueue
         $this->listId = null;
         $this->tableSchema = env('DB_DATABASE');
         $this->wpDbPrefix = env('DB_WP_TABLES_PREFIX', 'wp_');
-        $this->CSVBulkImportService = new CSVBulkImportService(new UserService(), new KSActivityService() );
+        $this->CSVBulkImportService = new CSVBulkImportService(new UserService(), new KSActivityService(), new ListService());
         $this->defaultTables = [
             'Contacts' => [
                 'table' => "{$this->wpDbPrefix}ks_contacts",
@@ -93,8 +95,8 @@ class CSVBulkImport implements ShouldQueue
                 'object_type' => 'account'
             ],
             'Opportunities' => [
-                'table' => "{$this->wpDbPrefix}ks_contacts",
-                'meta_table' => "{$this->wpDbPrefix}ks_contacts_meta",
+                'table' => "{$this->wpDbPrefix}ks_opportunities",
+                'meta_table' => "{$this->wpDbPrefix}ks_opportunities_meta",
                 'stages_table' => "{$this->wpDbPrefix}ks_crm_opportunities_stages",
                 'object_type' => 'opportunity'
             ]
@@ -164,6 +166,8 @@ class CSVBulkImport implements ShouldQueue
         $resultsFile = fopen("{$resultFileName}", "a+");
 
         $listIdIndex = null;
+        $failCounter = 0;
+        $successCounter = 0;
 
         for($this->lineIndex = 1; $line = fgetcsv($csvFile); $this->lineIndex++) {
             if ($this->lineIndex == 1) {
@@ -219,7 +223,7 @@ class CSVBulkImport implements ShouldQueue
                         'id' => $record['id'] ?? '',
                         'custom_fields' => [],
                     ];
-                    fwrite($resultsFile, json_encode($results) . "\n"); // Add more fields as needed
+                    $failCounter++;
                     continue;
                 };
 
@@ -247,12 +251,10 @@ class CSVBulkImport implements ShouldQueue
                     [$record, $results] = $this->insertRecord($record, $results);
                 }
 
-                fwrite($resultsFile, json_encode($results) . "\n");
-
-                /*if (isset($this->optData['opt_status']) && $this->optData['opt_status'] == 'Opted-In' && $record['id'] != null) {
-                    $KsContact = new KS_Contact();
+                Log::info($record);
+                if (isset($this->optData['opt_status']) && $this->optData['opt_status'] == 'Opted-In' && $record['id'] != null) {
                     //Create contact opt log
-                    $resp = $KsContact->insert_contact_opt_log([
+                    $resp = $this->CSVBulkImportService->insertContactOptLog([
                         'contact_id' => $record['id'],
                         'user_id' => $this->userId,
                         'full_name' => $this->optData['full_name'],
@@ -262,11 +264,27 @@ class CSVBulkImport implements ShouldQueue
 
                 // Add contact
                 if ($this->listId && $this->defaultTables[$this->importType]['object_type'] == 'contact') {
-                    $contactId = $ks_contact->get_contact_id_by_email($record['email_address'], $this->companyId);
-                    $ks_list->insert_multiple_contact_list([['list_id' => $this->listId, 'contact_id' => $contactId,]]);
-                }*/
+                    $contactId = $this->CSVBulkImportService->getContactIdByEmail ($record['email_address'], $this->companyId);
+                    $this->CSVBulkImportService->insertMultipleContactList([['list_id' => $this->listId, 'contact_id' => $contactId,]]);
+                }
+                $successCounter++;
+                fwrite($resultsFile, json_encode($results) . "\n");
             }
         }
+
+        $csvRecord = CSVImport::find($this->csvId);
+        $csvRecord->success_records = $csvRecord->success_records + $successCounter;
+        $csvRecord->fail_records = $csvRecord->fail_records + $failCounter;
+
+        if($csvRecord->total_records === ($csvRecord->fail_records + $csvRecord->success_records)) {
+            if($csvRecord->total_records === $csvRecord->fail_records) {
+                $csvRecord->status = 'fail';
+            } else {
+                $csvRecord->status = 'completed';
+            }
+        }
+        //$csvRecord->results = $resultFileName;
+        $csvRecord->save();
     }
 
     protected function validateContacts($record, $results) {

@@ -8,14 +8,19 @@ use App\Models\Contact;
 use App\Models\ContactMeta;
 use App\Models\Opportunity;
 use App\Models\OpportunityMeta;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class CSVBulkImportService
 {
     protected $userService;
     protected $ksActivityService;
-    public function __construct(UserService $userService, KSActivityService $ksActivityService) {
+    protected $listService;
+
+    public function __construct(UserService $userService, KSActivityService $ksActivityService, ListService $listService) {
         $this->userService = $userService;
         $this->ksActivityService = $ksActivityService;
+        $this->listService = $listService;
     }
 
     public function ksCreateContactActivity($contactInfo, $contactId, $action, $userId = '', $viaSync = false) {
@@ -415,6 +420,24 @@ class CSVBulkImportService
 
             return $this->ksActivityService->insertCrmActivity($info);
         }
+    }
+
+    public function insertContactOptLog($info)
+    {
+        return $this->listService->insertContactOptLog($info);
+    }
+
+    public function getContactIdByEmail($email, $companyId) {
+        $query = Contact::query();
+        $query->whereRaw("email_address = '$email'")
+            ->where('company_id', '=', $companyId)
+            ->select('id');
+
+        return $query->first()->id;
+    }
+
+    public function insertMultipleContactList($contactsListData) {
+        $this->listService->insertMultipleContactList($contactsListData);
     }
 
     public function getAllCurrencies()

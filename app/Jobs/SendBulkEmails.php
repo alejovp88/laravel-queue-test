@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\MarketingEmails;
+use App\Models\WPPostMeta;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -85,38 +86,82 @@ class SendBulkEmails implements ShouldQueue
 
                 $resp = $sendgrid->send($email);
                 if ($resp->statusCode() == 202) {
+                    Log::info("Email sent to {$emailToSend->email_address} with status code: {$resp->statusCode()}");
                     $sentEmails[] = $emailToSend->id;
                     $totalEmailsSend++;
+                    $data = [
+                        'data' => [
+                            'id' => $emailToSend->id,
+                            'email_address' => $emailToSend->email_address,
+                            'asset_id' => $emailToSend->asset_id,
+                            'company_id' => $emailToSend->company_id
+                        ],
+                        'status' => 'success',
+                    ];
+
                 } else {
                     Log::error("Error sending email {$emailToSend->id} to {$emailToSend->email_address}");
+                    MarketingEmails::where('id', $emailToSend->id)
+                        ->update(['sent_at' => now()]);
+
+                    $data = [
+                        'data' => [
+                            'id' => $emailToSend->id,
+                            'email_address' => $emailToSend->email_address,
+                            'company_id' => $emailToSend->company_id
+                        ],
+                        'status' => 'failed',
+                    ];
                 }
+
+                $curl = curl_init();
+                curl_setopt_array($curl, array(
+                    CURLOPT_URL            => env('API_URL_WP')."emails/after-send",
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_ENCODING       => '',
+                    CURLOPT_MAXREDIRS      => 10,
+                    CURLOPT_TIMEOUT        => 0,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+                    CURLOPT_CUSTOMREQUEST  => 'POST',
+                    CURLOPT_POSTFIELDS     => json_encode($data),
+                    CURLOPT_HTTPHEADER     => array(
+                        'Content-Type: application/json',
+                    ),
+                ));
+
+                curl_exec($curl);
+                curl_getinfo($curl, CURLINFO_HTTP_CODE);
+                curl_close($curl);
             }
 
             MarketingEmails::whereIn('id', $sentEmails)
                 ->update(['status' => 'success', 'sent_at' => now()]);
 
             //Update emails_sent meta
-            $existingMeta = DB::table('wp_postmeta')
-                ->where('post_id', $emailToSend->company_id)
+            $existingMeta = WPPostMeta::where('post_id', $emailToSend->company_id)
                 ->where('meta_key', 'emails_sent')
                 ->first();
 
-            if ($existingMeta) {
+            if ($existingMeta) { // if the meta exists, update it
                 $sum = $existingMeta->meta_value + $totalEmailsSend;
-                DB::table('wp_postmeta')
-                    ->where('post_id', $emailToSend->company_id)
+                WPPostMeta::where('post_id', $emailToSend->company_id)
                     ->where('meta_key', 'emails_sent')
                     ->update(['meta_value' => $sum]);
 
-            } else {
-                DB::table('wp_postmeta')->insert([
+            } else { // if the meta doesn't exist, create it
+                $emailsSent = MarketingEmails::where('company_id', $emailToSend->company_id)
+                    ->where('status', 'success')
+                    ->whereRaw('MONTH(me.sent_at) = MONTH(NOW())')
+                    ->count();
+                $emailsSent = $emailsSent ?? 0;
+
+                WPPostMeta::insert([
                     'post_id' => $emailToSend->company_id,
                     'meta_key' => 'emails_sent',
-                    'meta_value' => $totalEmailsSend,
+                    'meta_value' => $emailsSent,
                 ]);
             }
-
-            // TODO: Update email limit, notifications, etc. and log the result (see wordpress repository, file: wp-content/themes/CFtheme/framework/classes/Emails.php:363)
         } catch (\Throwable $th) {
             Log::error($th);
         }

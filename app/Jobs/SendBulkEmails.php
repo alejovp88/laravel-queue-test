@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\MarketingEmails;
+use App\Models\WPPostMeta;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -138,28 +139,24 @@ class SendBulkEmails implements ShouldQueue
                 ->update(['status' => 'success', 'sent_at' => now()]);
 
             //Update emails_sent meta
-            $existingMeta = DB::table('wp_postmeta')
-                ->where('post_id', $emailToSend->company_id)
+            $existingMeta = WPPostMeta::where('post_id', $emailToSend->company_id)
                 ->where('meta_key', 'emails_sent')
                 ->first();
 
             if ($existingMeta) { // if the meta exists, update it
                 $sum = $existingMeta->meta_value + $totalEmailsSend;
-                DB::table('wp_postmeta')
-                    ->where('post_id', $emailToSend->company_id)
+                WPPostMeta::where('post_id', $emailToSend->company_id)
                     ->where('meta_key', 'emails_sent')
                     ->update(['meta_value' => $sum]);
 
             } else { // if the meta doesn't exist, create it
-                $emailsSent = DB::table('wp_ks_marketing_emails', 'me')
-                    ->selectRaw('COUNT(*) as count')
-                    ->where('me.company_id', $emailToSend->company_id)
-                    ->where('me.status', 'success')
+                $emailsSent = MarketingEmails::where('company_id', $emailToSend->company_id)
+                    ->where('status', 'success')
                     ->whereRaw('MONTH(me.sent_at) = MONTH(NOW())')
-                    ->value('count');
+                    ->count();
                 $emailsSent = $emailsSent ?? 0;
 
-                DB::table('wp_postmeta')->insert([
+                WPPostMeta::insert([
                     'post_id' => $emailToSend->company_id,
                     'meta_key' => 'emails_sent',
                     'meta_value' => $emailsSent,

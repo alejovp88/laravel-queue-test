@@ -251,7 +251,6 @@ class CSVBulkImport implements ShouldQueue
                     [$record, $results] = $this->insertRecord($record, $results);
                 }
 
-                Log::info($record);
                 if (isset($this->optData['opt_status']) && $this->optData['opt_status'] == 'Opted-In' && $record['id'] != null) {
                     //Create contact opt log
                     $resp = $this->CSVBulkImportService->insertContactOptLog([
@@ -265,7 +264,7 @@ class CSVBulkImport implements ShouldQueue
                 // Add contact
                 if ($this->listId && $this->defaultTables[$this->importType]['object_type'] == 'contact') {
                     $contactId = $this->CSVBulkImportService->getContactIdByEmail ($record['email_address'], $this->companyId);
-                    $this->CSVBulkImportService->insertMultipleContactList([['list_id' => $this->listId, 'contact_id' => $contactId,]]);
+                    $this->CSVBulkImportService->insertMultipleContactList([['list_id' => $this->listId, 'contact_id' => $contactId]]);
                 }
                 $successCounter++;
                 fwrite($resultsFile, json_encode($results) . "\n");
@@ -612,16 +611,16 @@ class CSVBulkImport implements ShouldQueue
 
                 if($objectType === 'opportunity' && $foreignRecord['field'] === 'contact_id') {
                     continue;
-                } else {
-                    if (!$foreignRecord['exist']) {
-                        $results['field_error'][] = [
-                            'field' => $foreignRecord['field'],
-                            'message' => "Invalid {$foreignRecord['field']}",
-                            'value' => $foreignRecord['id'],
-                            'row' => $this->lineIndex
-                        ];
-                        $this->isValid['foreignRecord'] = false;
-                    }
+                }
+
+                if (!$foreignRecord['exist']) {
+                    $results['field_error'][] = [
+                        'field' => $foreignRecord['field'],
+                        'message' => "Invalid {$foreignRecord['field']}",
+                        'value' => $foreignRecord['id'],
+                        'row' => $this->lineIndex
+                    ];
+                    $this->isValid['foreignRecord'] = false;
                 }
             }
         }
@@ -870,7 +869,7 @@ class CSVBulkImport implements ShouldQueue
 
             if(!isset($record['account_id'])) {
                 $accountId = Account::where('company_id', '=', $this->companyId)
-                    ->whereRaw("website LIKE ''")
+                    ->whereRaw("website LIKE '%{$record['email_address']}%'")
                     ->select('id')
                     ->first();
 
@@ -897,10 +896,10 @@ class CSVBulkImport implements ShouldQueue
         $element = $row->save();
 
         $status = ($element) ? 'created' : $status;
-        $record['íd'] = $row->id;
+        $record['id'] = $row->id;
 
         //---- Save / update custom fields
-        $createdCustomFields = $this->saveCustomFields($record, $record['íd']);
+        $createdCustomFields = $this->saveCustomFields($record, $record['id']);
         if (!empty($createdCustomFields)) {
             foreach ($createdCustomFields as $key => $customField) {
                 if ($customField['status'] == 'error') {
@@ -937,7 +936,7 @@ class CSVBulkImport implements ShouldQueue
         $results['rows'][] = [
             'status' => $status,
             'custom_fields' => $createdCustomFields ?? [],
-            'id' => $record['íd'] ?? ''
+            'id' => $record['id'] ?? ''
         ];
 
         return [$record, $results];
@@ -1001,7 +1000,8 @@ class CSVBulkImport implements ShouldQueue
                         }
                     }
 
-                    $row->update($customFieldRow);
+                    $row->fill($customFieldRow);
+                    $row->save();
 
                     $status = $row->id ? 'created' : $status;
                 }

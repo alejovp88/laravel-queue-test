@@ -37,7 +37,8 @@ class ListService
             ->where('company_id', '=', $info['company_id'])
             ->select('id');
 
-        $logId  = $query->first()->id;
+        $result = $query->first();
+        $logId = ($result) ? $result->id : null;
 
         $now = new Carbon();
         $info['timestamp'] = $now->format('Y-m-d H:i:s');
@@ -50,7 +51,7 @@ class ListService
             "company_id" => $info['company_id'],
         ];
 
-        if(!empty($logId)) { // Update
+        if($logId) { // Update
             $insertData['updated_at'] = $info['last_modified'];
             $updated = DB::table($this->contactOptLog)
                 ->where('id','=', $logId)

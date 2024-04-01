@@ -19,7 +19,7 @@ class ApiController extends Controller
         return $this->response->json($data, $this->HTTP_OK);
     }
 
-    public function responseJsonWithError($message, $error) : JsonResponse {
+    public function responseJsonWithError($message, $error = JsonResponse::HTTP_CONFLICT) : JsonResponse {
         return $this->response->json([
             'error' => 1,
             'message' => $message

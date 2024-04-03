@@ -38,7 +38,7 @@ class CSVImportController extends ApiController
         $record = $query->first();
 
         if($record) {
-            $fileName = "{$record->csv_file}";
+            $fileName = env('APP_URL_WP') . "{$record->csv_file}";
             $csvFile = fopen($fileName, "r");
             $userId = $record->user_id;
 
@@ -78,6 +78,7 @@ class CSVImportController extends ApiController
                     for ($queue = 0; $queue < $this->highImportQueuesNumber; $queue++) {
                         $offset = ($queue * $recordsPerQueue) + $this->excludeHeaderOffset;
                         $jobParams['offSet'] = $offset;
+                        $jobParams['numberOfRecords'] = $offset + $recordsPerQueue;
                         dispatch(new CSVBulkImport($jobParams))->onQueue("csv-high-{$queue}");
                     }
                 }

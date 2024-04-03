@@ -65,7 +65,7 @@ class CSVBulkImport implements ShouldQueue
         $this->importType = $params['importType'];
         $this->fileName = $params['fileName'];
         $this->offSet = $params['offSet'];
-        $this->numberOfRecords = $params['offSet'] + $params['numberOfRecords'];
+        $this->numberOfRecords = $params['numberOfRecords'];
         $this->fieldsMap = json_decode($params['fieldsMap']);
         $this->companyId = $params['companyId'];
         $this->userId = $params['userId'];
@@ -163,7 +163,7 @@ class CSVBulkImport implements ShouldQueue
     {
         $csvFile = fopen("{$this->fileName}", "r");
         $resultFileName = substr($this->fileName, 0, -4) . "-results.json";
-        $resultsFile = fopen("{$resultFileName}", "a+");
+        //$resultsFile = fopen("{$resultFileName}", "a+");
 
         $listIdIndex = null;
         $failCounter = 0;
@@ -236,7 +236,12 @@ class CSVBulkImport implements ShouldQueue
                 if ($this->defaultTables[$this->importType]['object_type'] === 'contact') {
                     $query->whereRaw("email_address = '{$record['email_address']}'");
                 } elseif ($this->defaultTables[$this->importType]['object_type'] === 'account') {
-                    $query->whereRaw("name = '{$record['name']}'");
+                    if(strpos($record['name'], "'")) {
+                        $name = str_replace("'", "''", $record['name']);
+                    } else {
+                        $name = $record['name'];
+                    }
+                    $query->whereRaw("name = '$name'");
                 }
 
                 $element = $query->where('company_id', '=', $this->companyId)
@@ -267,7 +272,8 @@ class CSVBulkImport implements ShouldQueue
                     $this->CSVBulkImportService->insertMultipleContactList([['list_id' => $this->listId, 'contact_id' => $contactId]]);
                 }
                 $successCounter++;
-                fwrite($resultsFile, json_encode($results) . "\n");
+                //fwrite($resultsFile, json_encode($results) . "\n");
+                //Log::info($results);
             }
         }
 
@@ -351,8 +357,13 @@ class CSVBulkImport implements ShouldQueue
         $objectType = $this->defaultTables[$this->importType]['object_type'];
 
         if(!empty($record['company'])) {
+            if(strpos($record['company'], "'")) {
+                $name = str_replace("'", "''", $record['company']);
+            } else {
+                $name = $record['company'];
+            }
             $account = DB::TABLE("{$this->defaultTables['Accounts']['table']}")
-                ->whereRaw("name = '{$record['company']}'")
+                ->whereRaw("name = '$name'")
                 ->where('company_id', '=', $this->companyId)
                 ->select('id')
                 ->first();
@@ -851,8 +862,13 @@ class CSVBulkImport implements ShouldQueue
         if (array_search($objectType, ['contact', 'opportunity'])) {
             // Check if account name exists in db to set account_id in register
             if (isset($record['account'])) {
+                if(strpos($record['account'], "'")) {
+                    $name = str_replace("'", "''", $record['account']);
+                } else {
+                    $name = $record['account'];
+                }
                 $accountId = Account::where('company_id', '=', $this->companyId)
-                    ->whereRaw("name = '{$record['account']}'")
+                    ->whereRaw("name = '$name'")
                     ->select('id')
                     ->first();
 
@@ -868,8 +884,9 @@ class CSVBulkImport implements ShouldQueue
             }
 
             if(!isset($record['account_id'])) {
+                $emailInfo = explode('@', $record['email_address']);
                 $accountId = Account::where('company_id', '=', $this->companyId)
-                    ->whereRaw("website LIKE '%{$record['email_address']}%'")
+                    ->whereRaw("website LIKE '%{$emailInfo[1]}%'")
                     ->select('id')
                     ->first();
 

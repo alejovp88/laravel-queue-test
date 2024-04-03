@@ -51,17 +51,17 @@ class EmailSendController extends ApiController
         
                 if ($emailsCount < $this->lowLoadAmount) {
                     if($emailsLeft > $emailsCount) {
-                        dispatch(new SendBulkEmails($companyId, $emailIds, $batchID))->delay($sendDate)->onQueue("low");
+                        dispatch(new SendBulkEmails($companyId, $emailIds, $batchID))->delay($sendDate)->onQueue("email-low");
                     } else {
                         $email_jobs = array_chunk($emailIds, $emailsLeft);
-                        dispatch(new SendBulkEmails($companyId, $email_jobs[0], $batchID))->delay($sendDate)->onQueue("low");
+                        dispatch(new SendBulkEmails($companyId, $email_jobs[0], $batchID))->delay($sendDate)->onQueue("email-low");
                     }
                 } else if ($emailsCount < $this->midLoadAmount) {
                     if($emailsLeft > $emailsCount) {
-                        dispatch(new SendBulkEmails($companyId, $emailIds, $batchID))->delay($sendDate)->onQueue("medium");
+                        dispatch(new SendBulkEmails($companyId, $emailIds, $batchID))->delay($sendDate)->onQueue("email-medium");
                     } else {
                         $email_jobs = array_chunk($emailIds, $emailsLeft);
-                        dispatch(new SendBulkEmails($companyId, $email_jobs[0], $batchID))->delay($sendDate)->onQueue("medium");
+                        dispatch(new SendBulkEmails($companyId, $email_jobs[0], $batchID))->delay($sendDate)->onQueue("email-medium");
                     }
                 } else {
                     if($emailsLeft > $emailsCount) {
@@ -71,7 +71,7 @@ class EmailSendController extends ApiController
                     }
                     $email_jobs = array_chunk($emailIds, $this->emailsPerCycle);
                     foreach ($email_jobs as $key => $ids) {
-                        dispatch(new SendBulkEmails($companyId, $ids, $batchID))->delay($sendDate)->onQueue("high-$key");
+                        dispatch(new SendBulkEmails($companyId, $ids, $batchID))->delay($sendDate)->onQueue("email-high-$key");
                     }
                 }
     

@@ -13,11 +13,13 @@ class CSVtoSQLController extends ApiController
 {
     public function csvToSQl() {
 
-        $fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-Prospects.csv";
-        $fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-TapeVaulting-Customer-Contact-List.csv";
+        //$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-Prospects.csv";
+        //$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-TapeVaulting-Customer-Contact-List.csv";
         $fileName = "/var/Projects/littleTaller/csvSqlImport/OSP-Customer-Contact-List-All-Import-to-PSP.csv";
 
         $csvFile = fopen($fileName, "r");
+        $sqlInsertFile = substr($fileName, 0, -4) . "-insert.sql";
+        $sqlFile = fopen("{$sqlInsertFile}", "w+");
 
         $fieldRules = DB::TABLE("INFORMATION_SCHEMA.COLUMNS")
             ->whereRaw("TABLE_SCHEMA = 'kaseyacommunitydev'")
@@ -40,8 +42,6 @@ class CSVtoSQLController extends ApiController
         $headerFields = [];
         $record = [];
 
-        //Log::info(json_decode(json_encode($fieldRules), true));
-
         for($i = 1; $line = fgetcsv($csvFile); $i++) {
             if($i == 1) {
                 $headerFields = $line;
@@ -52,7 +52,12 @@ class CSVtoSQLController extends ApiController
                         $line[$index] = trim($line[$index]);
                         if($index !== false) {
                             if($field->DATA_TYPE === 'varchar') {
-                                $record[$field->COLUMN_NAME] = "'{$line[$index]}'";
+                                if(strpos($line[$index], "'")) {
+                                    $value = str_replace("'", "''", $line[$index]);
+                                } else {
+                                    $value = $line[$index];
+                                }
+                                $record[$field->COLUMN_NAME] = "'$value'";
                             } else {
                                 $record[$field->COLUMN_NAME] = $line[$index];
                             }
@@ -101,7 +106,12 @@ class CSVtoSQLController extends ApiController
                                     }
                                 } else {
                                     if($field->DATA_TYPE === 'varchar') {
-                                        $record[$field->COLUMN_NAME] = "'{$line[$index]}'";
+                                        if(strpos($line[$index], "'")) {
+                                            $value = str_replace("'", "''", $line[$index]);
+                                        } else {
+                                            $value = $line[$index];
+                                        }
+                                        $record[$field->COLUMN_NAME] = "'$value'";
                                     } else {
                                         $record[$field->COLUMN_NAME] = $line[$index];
                                     }
@@ -131,11 +141,9 @@ class CSVtoSQLController extends ApiController
                 $message .= implode(",", $valuesToFieldSql);
                 $message .= ");";
 
-                Log::info($message);
+                //Log::info($message);
+                fwrite($sqlFile, "$message\n");
             }
-            /*if ($i == 20) {
-                break;
-            }*/
         }
     }
 }

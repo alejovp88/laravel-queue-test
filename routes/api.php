@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\api\EmailSendController;
 use App\Http\Controllers\api\CSVImportController;
+use App\Http\Controllers\api\CSVtoSQLController;
 
 /*
 |--------------------------------------------------------------------------
@@ -22,3 +23,4 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Route::get('/email/queue/{companyId}/{batchID}', [EmailSendController::class, 'index']);
 Route::get('/csv-import/queue/{companyId}', [CSVImportController::class, 'importCSV']);
+Route::get('/csv-import/sql/', [CSVtoSQLController::class, 'csvToSQl']);

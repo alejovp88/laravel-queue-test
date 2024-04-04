@@ -49,6 +49,7 @@ class CSVtoSQLController extends ApiController
                 foreach ($fieldRules as $field) {
                     if($field->IS_NULLABLE === 'NO') {
                         $index = array_search($field->COLUMN_NAME, $headerFields);
+                        $line[$index] = trim($line[$index]);
                         if($index !== false) {
                             if($field->DATA_TYPE === 'varchar') {
                                 $record[$field->COLUMN_NAME] = "'{$line[$index]}'";
@@ -76,6 +77,7 @@ class CSVtoSQLController extends ApiController
                         }
                     } else {
                         $index = array_search($field->COLUMN_NAME, $headerFields);
+                        $line[$index] = trim($line[$index]);
                         if($index !== false) {
                             if($line[$index] === "") {
                                 $record[$field->COLUMN_NAME] = 'NULL';
@@ -131,9 +133,9 @@ class CSVtoSQLController extends ApiController
 
                 Log::info($message);
             }
-            if ($i == 20) {
+            /*if ($i == 20) {
                 break;
-            }
+            }*/
         }
     }
 }

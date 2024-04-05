@@ -13,10 +13,10 @@ class CSVtoSQLController extends ApiController
 {
     public function csvToSQl() {
 
-        /*$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-Prospects.csv";
-        $customFieldValue = "Prospect";*/
         /*$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-Former-Customer.csv";
         $customFieldValue = "Former Customer";*/
+        /*$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-Prospects.csv";
+        $customFieldValue = "Prospect";*/
         /*$fileName = "/var/Projects/littleTaller/csvSqlImport/One-Safe-Place-TapeVaulting-Customer-Contact-List.csv";
         $customFieldValue = "TapeVaulting";*/
         $fileName = "/var/Projects/littleTaller/csvSqlImport/OSP-Customer-Contact-List-All-Import-to-PSP.csv";
@@ -47,6 +47,7 @@ class CSVtoSQLController extends ApiController
         $headerFields = [];
         $record = [];
         $duplicatedIds = [];
+        $emailIndex = null;
 
         for($i = 1; $line = fgetcsv($csvFile); $i++) {
             if($i == 1) {
@@ -72,14 +73,8 @@ class CSVtoSQLController extends ApiController
                                 $record[$field->COLUMN_NAME] = $line[$index];
                             }
 
-                            if ($field->COLUMN_NAME === 'email') {
-                                $emailInfo = explode("@", $line[$index]);
-                                $account = Account::whereRaw("website LIKE '%{$emailInfo[1]}%'")
-                                    ->select('id')
-                                    ->first();
-                                if($account) {
-                                    $record['account_id'] = $account->id;
-                                }
+                            if ($field->COLUMN_NAME === 'email_address') {
+                                $emailIndex = $index;
                             }
                         } else {
                             if($field->COLUMN_NAME === 'last_modified_by') {
@@ -123,8 +118,7 @@ class CSVtoSQLController extends ApiController
                     } else {
                         $name = $line[$index];
                     }
-                    $account = DB::TABLE("wp_ks_accounts")
-                        ->whereRaw("name LIKE '%$name%'")
+                    $account = Account::whereRaw("name LIKE '%$name%'")
                         ->where('company_id', '=', 3347)
                         ->select('id')
                         ->first();
@@ -152,8 +146,10 @@ class CSVtoSQLController extends ApiController
                 $message .= implode(",", $valuesToFieldSql);
                 $message .= ");";
 
-                //Log::info($message);
-                $user = DB::TABLE("wp_ks_contacts")->whereRaw("email_address LIKE '%{$line[5]}%'")->first();
+                $user = DB::TABLE("wp_ks_contacts")
+                            ->whereRaw("email_address LIKE '%{$line[$emailIndex]}%'")
+                            ->where('company_id', '=', 3347)
+                            ->first();
                 if($user) {
                     $duplicatedIds[] = $user->id;
                 } else {
@@ -161,19 +157,20 @@ class CSVtoSQLController extends ApiController
                 }
             }
 
-            /**this code is only for the file One-Safe-Place-TapeVaulting-Customer-Contact-List.csv*/
-            /*$user = DB::TABLE("wp_ks_contacts")->whereRaw("email_address LIKE '%{$line[2]}%'")->first();
-            if($user) {
-                fwrite($sqlFile, "line: $i, email: {$line[5]}, id: {$user->id},\n");
-            }*/
-
         }
+
+        $duplicatedIds = implode(",", $duplicatedIds);
 
         $optQuery = "INSERT INTO wp_ks_contacts_opt(contact_id, user_id, full_name, company_id)
                          SELECT id, 1282, 'Rick Baird', 3347
                            FROM wp_ks_contacts
                           WHERE id > X;";
         fwrite($sqlFile, "$optQuery\n");
+
+        $metaQuery = "DELETE FROM wp_ks_contacts_meta
+                            WHERE name = 'segment'
+                              AND contact_id IN ($duplicatedIds);";
+        fwrite($sqlFile, "$metaQuery\n");
 
         $metaQuery = "INSERT INTO wp_ks_contacts_meta(contact_id, `name`, `value`, last_modified, last_modified_by)
                         SELECT id, 'segment', '$customFieldValue', CURRENT_TIMESTAMP(), 1282
@@ -185,7 +182,7 @@ class CSVtoSQLController extends ApiController
         $metaQuery = "INSERT INTO wp_ks_contacts_meta(contact_id, `name`, `value`, last_modified, last_modified_by)
                         SELECT id, 'segment', '$customFieldValue', CURRENT_TIMESTAMP(), 1282
                           FROM wp_ks_contacts
-                         WHERE id IN (" . implode(",", $duplicatedIds) . ");";
+                         WHERE id IN ($duplicatedIds);";
         fwrite($sqlFile, "$metaQuery\n");
 
     }
